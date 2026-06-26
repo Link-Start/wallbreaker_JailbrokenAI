@@ -21,7 +21,10 @@ async def _read_file(args: dict, ctx: ToolContext) -> str:
     p = _resolve(ctx, path)
     if not p.is_file():
         return f"Error: no such file: {p}"
-    data = p.read_text(encoding="utf-8", errors="replace")
+    try:
+        data = p.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        return f"Error reading {p}: {exc}"
     if len(data) > MAX_READ:
         return data[:MAX_READ] + f"\n... (truncated, {len(data)} chars total)"
     return data
@@ -33,8 +36,14 @@ async def _write_file(args: dict, ctx: ToolContext) -> str:
         return "Error: 'path' is required"
     content = args.get("content", "")
     p = _resolve(ctx, path)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(content, encoding="utf-8")
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(content, encoding="utf-8")
+    except OSError as exc:
+        return (
+            f"Error writing {p}: {exc}. Use a relative path; the working "
+            f"directory is {Path(ctx.cwd).resolve()}"
+        )
     return f"Wrote {len(content)} chars to {p}"
 
 
@@ -47,13 +56,16 @@ async def _edit_file(args: dict, ctx: ToolContext) -> str:
     p = _resolve(ctx, path)
     if not p.is_file():
         return f"Error: no such file: {p}"
-    data = p.read_text(encoding="utf-8")
-    count = data.count(old)
-    if count == 0:
-        return "Error: 'old' string not found"
-    if count > 1:
-        return f"Error: 'old' string is not unique ({count} matches)"
-    p.write_text(data.replace(old, new, 1), encoding="utf-8")
+    try:
+        data = p.read_text(encoding="utf-8")
+        count = data.count(old)
+        if count == 0:
+            return "Error: 'old' string not found"
+        if count > 1:
+            return f"Error: 'old' string is not unique ({count} matches)"
+        p.write_text(data.replace(old, new, 1), encoding="utf-8")
+    except OSError as exc:
+        return f"Error editing {p}: {exc}"
     return f"Edited {p}"
 
 

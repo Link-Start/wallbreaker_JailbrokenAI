@@ -33,6 +33,12 @@ def _tools_to_wire(tools: list[dict]) -> list[dict]:
     ]
 
 
+def _reasoning_fallback(content_chars: int, has_tools: bool, reasoning_parts: list[str]) -> str | None:
+    if content_chars == 0 and not has_tools and reasoning_parts:
+        return "[reasoning-only response]\n" + "".join(reasoning_parts)
+    return None
+
+
 def _messages_to_wire(messages: list[Message], system: str | None) -> list[dict]:
     wire: list[dict] = []
     if system:
@@ -99,6 +105,8 @@ class OpenAIProvider(Provider):
             payload["tools"] = _tools_to_wire(tools)
 
         pending: dict[int, dict] = {}
+        content_chars = 0
+        reasoning_parts: list[str] = []
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             async with client.stream("POST", url, headers=headers, json=payload) as resp:
                 if resp.status_code >= 400:
@@ -125,7 +133,11 @@ class OpenAIProvider(Provider):
                         continue
                     delta = choices[0].get("delta") or {}
                     if delta.get("content"):
+                        content_chars += len(delta["content"])
                         yield TextDelta(delta["content"])
+                    reasoning = delta.get("reasoning") or delta.get("reasoning_content")
+                    if reasoning:
+                        reasoning_parts.append(str(reasoning))
                     for tc in delta.get("tool_calls") or []:
                         idx = tc.get("index", 0)
                         slot = pending.setdefault(
@@ -138,6 +150,10 @@ class OpenAIProvider(Provider):
                             slot["name"] = fn["name"]
                         if fn.get("arguments"):
                             slot["args"] += fn["arguments"]
+
+        fallback = _reasoning_fallback(content_chars, bool(pending), reasoning_parts)
+        if fallback:
+            yield TextDelta(fallback)
 
         for idx in sorted(pending):
             slot = pending[idx]
