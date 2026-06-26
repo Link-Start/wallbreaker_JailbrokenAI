@@ -35,11 +35,12 @@ HELP_TEXT = """Slash commands:
 /log [on|off]         toggle the JSONL run log (every payload + verdict)
 /asr                  show the attack scoreboard (hits / held / log path)
 /report [path]        write a markdown findings report from the run log
+/session save|load [path]   persist or reload the whole engagement
+/save [path]          save a plain-text transcript
+/clear                clear the conversation
+/quit                 exit
 
 Ctrl+S report · Ctrl+Y copy last payload · Ctrl+L clear · Ctrl+C quit
-/clear                clear the conversation
-/save [path]          save the transcript
-/quit                 exit
 
 Up / Down arrows recall your previous inputs into the prompt.
 Type anything else to talk to the agent. It has shell, file, parseltongue,
@@ -440,6 +441,8 @@ class RthApp(App):
             self._cmd_objective(raw_arg)
         elif cmd == "/report":
             self._cmd_report(rest)
+        elif cmd == "/session":
+            self._cmd_session(rest)
         elif cmd == "/save":
             self._cmd_save(rest)
         else:
@@ -577,6 +580,42 @@ class RthApp(App):
             ))
         except OSError as exc:
             self._mount(widgets.error_panel(str(exc)))
+
+    def _cmd_session(self, rest: list[str]) -> None:
+        from ..session import load_session, save_session
+
+        action = rest[0].lower() if rest else "save"
+        path = rest[1] if len(rest) > 1 else "session.json"
+        if action == "save":
+            meta = {
+                "objective": self.objective,
+                "asr_hits": self.asr_hits,
+                "asr_total": self.asr_total,
+                "profile": self.endpoint.name,
+                "target_model": self.config.target.model if self.config.target else None,
+            }
+            try:
+                save_session(path, self.history, meta)
+                self._mount(widgets.info_panel(
+                    f"session saved to {path} ({len(self.history)} messages)",
+                    title="session",
+                ))
+            except OSError as exc:
+                self._mount(widgets.error_panel(str(exc)))
+        elif action == "load":
+            try:
+                history, meta = load_session(path)
+            except (OSError, ValueError) as exc:
+                self._mount(widgets.error_panel(f"load failed: {exc}"))
+                return
+            self.history = history
+            self.objective = meta.get("objective", "")
+            self.asr_hits = meta.get("asr_hits", 0)
+            self.asr_total = meta.get("asr_total", 0)
+            self._rerender(f"loaded {len(history)} messages from {path}")
+            self._refresh_status()
+        else:
+            self._mount(widgets.error_panel("usage: /session save|load [path]"))
 
     def _cmd_save(self, rest: list[str]) -> None:
         path = rest[0] if rest else "transcript.md"

@@ -4,6 +4,62 @@ import json
 from datetime import datetime
 from pathlib import Path
 
+from .agent.messages import (
+    Message,
+    TextBlock,
+    ToolResultBlock,
+    ToolUseBlock,
+)
+
+
+def _block_to_dict(block) -> dict:
+    if isinstance(block, TextBlock):
+        return {"type": "text", "text": block.text}
+    if isinstance(block, ToolUseBlock):
+        return {"type": "tool_use", "id": block.id, "name": block.name, "input": block.input}
+    if isinstance(block, ToolResultBlock):
+        return {
+            "type": "tool_result",
+            "tool_use_id": block.tool_use_id,
+            "content": block.content,
+            "is_error": block.is_error,
+        }
+    return {"type": "text", "text": str(block)}
+
+
+def _dict_to_block(data: dict):
+    kind = data.get("type")
+    if kind == "tool_use":
+        return ToolUseBlock(data["id"], data["name"], data.get("input", {}))
+    if kind == "tool_result":
+        return ToolResultBlock(
+            data["tool_use_id"], data.get("content", ""), data.get("is_error", False)
+        )
+    return TextBlock(data.get("text", ""))
+
+
+def save_session(path: str | Path, history: list[Message], meta: dict | None = None) -> Path:
+    path = Path(path)
+    payload = {
+        "meta": meta or {},
+        "messages": [
+            {"role": m.role, "content": [_block_to_dict(b) for b in m.content]}
+            for m in history
+        ],
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8")
+    return path
+
+
+def load_session(path: str | Path) -> tuple[list[Message], dict]:
+    path = Path(path)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    history = [
+        Message(role=m["role"], content=[_dict_to_block(b) for b in m.get("content", [])])
+        for m in data.get("messages", [])
+    ]
+    return history, data.get("meta", {})
+
 
 def _timestamp() -> str:
     return datetime.now().strftime("%Y%m%d-%H%M%S")

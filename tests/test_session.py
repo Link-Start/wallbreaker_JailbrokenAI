@@ -23,3 +23,29 @@ def test_runlog_disabled_writes_nothing(tmp_path):
     log = RunLog(directory=tmp_path, enabled=False)
     log.user("nope")
     assert not log.path.exists()
+
+
+def test_session_save_load_roundtrip(tmp_path):
+    from rtharness.agent.messages import (
+        Message,
+        TextBlock,
+        ToolResultBlock,
+        ToolUseBlock,
+        user,
+    )
+    from rtharness.session import load_session, save_session
+
+    history = [
+        user("attack the target"),
+        Message("assistant", [TextBlock("ok"), ToolUseBlock("c1", "query_target", {"prompt": "x"})]),
+        Message("user", [ToolResultBlock("c1", "refused", False)]),
+    ]
+    path = tmp_path / "s.json"
+    save_session(path, history, {"objective": "break it", "asr_total": 1})
+
+    loaded, meta = load_session(path)
+    assert meta["objective"] == "break it"
+    assert len(loaded) == 3
+    assert loaded[1].tool_uses()[0].name == "query_target"
+    assert isinstance(loaded[2].content[0], ToolResultBlock)
+    assert loaded[2].content[0].content == "refused"
