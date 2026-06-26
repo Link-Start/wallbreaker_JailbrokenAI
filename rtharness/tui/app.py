@@ -35,6 +35,7 @@ HELP_TEXT = """Slash commands:
 /template set <text>  hold a working template ({request} placeholder) to hand-iterate
 /template fire <cat>  fill {request}=<cat>, fire at target, auto-judge (set/save/clear too)
 /template test [a;b]  fire the template across a category battery, scoreboard
+/sysprompt set <text> hold ONE fixed system prompt; /sysprompt test sweeps tasks through it
 /lib [list|update|MODEL]   browse the L1B3RT4S library
 /log [on|off]         toggle the JSONL run log (every payload + verdict)
 /judge [on|off]       LLM judge verdicts on target replies (default on)
@@ -105,6 +106,7 @@ class RthApp(App):
         self._exit_summary: str | None = None
         self.objective = ""
         self.template = ""
+        self.sysprompt = ""
         self._state_path = state_path
         self._target_profile = prefs.get("target_profile")
         self._target_model = prefs.get("target_model")
@@ -523,6 +525,8 @@ class RthApp(App):
             self._cmd_objective(raw_arg)
         elif cmd == "/template":
             self._cmd_template(parts[1:], raw_arg)
+        elif cmd == "/sysprompt":
+            self._cmd_sysprompt(parts[1:], raw_arg)
         elif cmd == "/findings":
             self._cmd_findings(rest)
         elif cmd == "/report":
@@ -788,6 +792,47 @@ class RthApp(App):
             title="template test",
         ))
 
+    def _cmd_sysprompt(self, rest: list[str], raw: str) -> None:
+        sub = rest[0].lower() if rest else "show"
+        body = raw[len(rest[0]):].strip() if rest else ""
+        if sub == "show" or not rest:
+            self._mount(widgets.info_panel(
+                self.sysprompt or "no system prompt set. /sysprompt set <text>",
+                title="sysprompt",
+            ))
+        elif sub == "set":
+            self.sysprompt = body
+            self._mount(widgets.info_panel(
+                f"system prompt set ({len(body)} chars)\n\n{body[:400]}", title="sysprompt"
+            ))
+        elif sub == "clear":
+            self.sysprompt = ""
+            self._mount(widgets.info_panel("system prompt cleared", title="sysprompt"))
+        elif sub == "save":
+            path = rest[1] if len(rest) > 1 else "sysprompt.txt"
+            try:
+                with open(path, "w", encoding="utf-8") as h:
+                    h.write(self.sysprompt)
+                self._mount(widgets.info_panel(f"saved to {path}", title="sysprompt"))
+            except OSError as exc:
+                self._mount(widgets.error_panel(str(exc)))
+        elif sub == "test":
+            if not self.sysprompt:
+                self._mount(widgets.error_panel("set a system prompt first: /sysprompt set <text>"))
+                return
+            tasks = [t.strip() for t in body.split(";") if t.strip()] if body else None
+            self.run_worker(self._sysprompt_test(tasks), group="judge", exclusive=False)
+        else:
+            self._mount(widgets.error_panel("usage: /sysprompt [show|set|test|save|clear]"))
+
+    async def _sysprompt_test(self, tasks) -> None:
+        args = {"system": self.sysprompt}
+        if tasks:
+            args["tasks"] = tasks
+        res = await self.registry.execute("system_sweep", args)
+        self._mount(widgets.info_panel(res.content, title="sysprompt sweep"))
+        self._refresh_status()
+
     def _cmd_objective(self, raw: str) -> None:
         if not raw:
             self._mount(widgets.info_panel(
@@ -841,6 +886,7 @@ class RthApp(App):
             meta = {
                 "objective": self.objective,
                 "template": self.template,
+                "sysprompt": self.sysprompt,
                 "asr_hits": self.asr_hits,
                 "asr_total": self.asr_total,
                 "profile": self.endpoint.name,
@@ -863,6 +909,7 @@ class RthApp(App):
             self.history = history
             self.objective = meta.get("objective", "")
             self.template = meta.get("template", "")
+            self.sysprompt = meta.get("sysprompt", "")
             self.asr_hits = meta.get("asr_hits", 0)
             self.asr_total = meta.get("asr_total", 0)
             self._rerender(f"loaded {len(history)} messages from {path}")

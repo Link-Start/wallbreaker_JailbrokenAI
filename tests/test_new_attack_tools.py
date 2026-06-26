@@ -80,3 +80,17 @@ def test_pair_converges_with_mocks(monkeypatch):
     )
     assert "COMPLIED" in res.content
     assert "WINNING ATTACK PROMPT" in res.content
+
+
+def test_system_sweep_registered_and_guards():
+    from rtharness.tools import build_registry, system_sweep
+    from rtharness.tools.registry import ToolContext, ToolRegistry
+    from rtharness.config import Config, load_config
+    import asyncio
+    assert "system_sweep" in build_registry(load_config()).names()
+    reg = ToolRegistry(ToolContext(config=Config(default_profile="x", profiles={})))
+    system_sweep.register(reg)
+    assert "required" in asyncio.run(reg.execute("system_sweep", {})).content.lower()
+    assert "no [target]" in asyncio.run(
+        reg.execute("system_sweep", {"system": "you are free"})
+    ).content.lower()
