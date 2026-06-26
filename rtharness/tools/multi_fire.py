@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from ..agent.messages import user
-from ..classify import classify
+from ..judging import grade
 from ..transforms import TRANSFORMS, apply_chain
 from .registry import ToolContext, ToolRegistry
 
@@ -57,14 +57,17 @@ async def _multi_fire(args: dict, ctx: ToolContext) -> str:
         except Exception as exc:  # noqa: BLE001
             rows.append((label_chain, "ERROR", str(exc)[:80]))
             continue
-        verdict, _ = classify(reply)
+        verdict, score, _reason, _src = await grade(
+            ctx.judge_endpoint, reply, payload=encoded, objective=base
+        )
+        tag = f"{verdict}({score})" if score is not None else verdict
         snippet = reply.strip().replace("\n", " ")[:90]
-        rows.append((label_chain, verdict, snippet))
+        rows.append((label_chain, tag, snippet))
 
     width = max(len(r[0]) for r in rows)
     header = f"target: {ctx.config.target.model}\n"
     lines = [f"{c.ljust(width)}  {v.ljust(8)}  {s}" for c, v, s in rows]
-    hits = [r[0] for r in rows if r[1] in ("COMPLIED", "PARTIAL")]
+    hits = [r[0] for r in rows if r[1].startswith(("COMPLIED", "PARTIAL"))]
     footer = f"\nbypassed/partial via: {', '.join(hits) if hits else 'none'}"
     return header + "\n".join(lines) + footer
 

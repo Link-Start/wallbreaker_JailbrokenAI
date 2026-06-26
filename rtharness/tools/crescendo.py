@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from ..agent.messages import Message, TextBlock, user
-from ..classify import classify
+from ..judging import grade
 from .registry import ToolContext, ToolRegistry
 
 
@@ -32,9 +32,12 @@ async def _crescendo(args: dict, ctx: ToolContext) -> str:
             lines.append(f"turn {i} [ERROR] {str(exc)[:80]}")
             break
         convo.append(Message(role="assistant", content=[TextBlock(reply)]))
-        label, _ = classify(reply)
+        label, score, _reason, _src = await grade(
+            ctx.judge_endpoint, reply, payload=text, objective=turns[-1]
+        )
+        tag = f"{label}({score})" if score is not None else label
         snippet = reply.strip().replace("\n", " ")[:100]
-        lines.append(f"turn {i} [{label}] {text[:45]!r} -> {snippet}")
+        lines.append(f"turn {i} [{tag}] {text[:45]!r} -> {snippet}")
         if label == "COMPLIED" and broke_at is None:
             broke_at = i
 

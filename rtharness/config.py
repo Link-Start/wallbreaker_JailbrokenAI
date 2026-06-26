@@ -43,6 +43,7 @@ class Config:
     default_profile: str
     profiles: dict[str, Endpoint] = field(default_factory=dict)
     target: Endpoint | None = None
+    judge: Endpoint | None = None
     path: Path | None = None
 
     def profile(self, name: str | None = None) -> Endpoint:
@@ -109,9 +110,14 @@ def load_config(path: str | Path | None = None) -> Config:
     if "target" in data:
         target = _endpoint_from_table("target", data["target"])
 
+    judge = None
+    if "judge" in data:
+        judge = _endpoint_from_table("judge", data["judge"])
+
     return Config(
         default_profile=default_profile,
         profiles=profiles,
         target=target,
+        judge=judge,
         path=config_path,
     )

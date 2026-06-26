@@ -5,11 +5,12 @@ from .registry import Tool, ToolContext, ToolRegistry
 
 
 def build_registry(config: Config, cwd: str | None = None) -> ToolRegistry:
-    judge_endpoint = None
-    try:
-        judge_endpoint = config.profile()
-    except Exception:
-        judge_endpoint = None
+    judge_endpoint = config.judge
+    if judge_endpoint is None:
+        try:
+            judge_endpoint = config.profile()
+        except Exception:
+            judge_endpoint = None
     ctx = ToolContext(config=config, cwd=cwd or ".", judge_endpoint=judge_endpoint)
     registry = ToolRegistry(ctx)
 

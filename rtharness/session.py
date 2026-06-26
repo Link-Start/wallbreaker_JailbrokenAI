@@ -65,6 +65,15 @@ def _timestamp() -> str:
     return datetime.now().strftime("%Y%m%d-%H%M%S")
 
 
+def new_session_path(directory: str | Path = "sessions") -> Path:
+    return Path(directory) / f"session-{_timestamp()}.json"
+
+
+def list_sessions(directory: str | Path = "sessions") -> list[Path]:
+    d = Path(directory)
+    return sorted(d.glob("session-*.json")) if d.is_dir() else []
+
+
 class RunLog:
     def __init__(self, directory: str | Path = "sessions", enabled: bool = True):
         self.enabled = enabled

@@ -33,6 +33,7 @@ HELP_TEXT = """Slash commands:
 /objective [text]     set the engagement goal (threaded into the run + report)
 /lib [list|update|MODEL]   browse the L1B3RT4S library
 /log [on|off]         toggle the JSONL run log (every payload + verdict)
+/judge [on|off]       LLM judge verdicts on target replies (default on)
 /asr                  show the attack scoreboard (hits / held / log path)
 /report [path]        write a markdown findings report from the run log
 /session save|load [path]   persist or reload the whole engagement
@@ -93,6 +94,7 @@ class RthApp(App):
         self.asr_total = 0
         self._last_payload = ""
         self.exit_on_finish = bool(prefs.get("exit_on_finish", True))
+        self.judge_enabled = bool(prefs.get("judge", True))
         self._exit_summary: str | None = None
         self.objective = ""
         self._state_path = state_path
@@ -113,7 +115,11 @@ class RthApp(App):
             "rounds": self.max_rounds,
             "exit_on_finish": self.exit_on_finish,
             "log": self.runlog.enabled,
+            "judge": self.judge_enabled,
         })
+
+    def _judge_endpoint(self):
+        return self.config.judge or self.endpoint
 
     def compose(self) -> ComposeResult:
         yield Static(self._status_text(), id="status")
@@ -138,9 +144,10 @@ class RthApp(App):
         )
         state = "WORKING" if self._busy else "idle"
         tok = f"{self.tokens_in}>{self.tokens_out}tok"
+        judge = "judge" if self.judge_enabled else "heur"
         return (
             f" {state} | profile={self.endpoint.name} | model={self.endpoint.model} | "
-            f"target={tgt} | {mode} | ASR={asr} | {tok}"
+            f"target={tgt} | {mode} | ASR={asr}/{judge} | {tok}"
         )
 
     def _refresh_status(self) -> None:
@@ -376,17 +383,39 @@ class RthApp(App):
 
     def _on_tool_result(self, _id: str, name: str, content: str, is_error: bool) -> None:
         self.runlog.tool_result(name, content, is_error)
-        verdict = None
         if name == "query_target" and not is_error:
             reply = content.split("\n", 1)[1] if content.startswith("[target") else content
+            payload = self._last_payload
+            if self.judge_enabled:
+                self._mount(widgets.tool_result_panel(name, content, is_error))
+                self.run_worker(
+                    self._judge_and_post(payload, reply),
+                    group="judge", exclusive=False,
+                )
+                return
             label, reason = classify(reply)
-            verdict = (label, verdict_color(label))
-            self.asr_total += 1
-            if label in ("COMPLIED", "PARTIAL"):
-                self.asr_hits += 1
-            self.runlog.verdict(self._last_payload, reply, label, reason)
-            self._refresh_status()
-        self._mount(widgets.tool_result_panel(name, content, is_error, verdict))
+            self._record_verdict(payload, reply, label, reason)
+            self._mount(widgets.tool_result_panel(
+                name, content, is_error, (label, verdict_color(label))
+            ))
+            return
+        self._mount(widgets.tool_result_panel(name, content, is_error))
+
+    async def _judge_and_post(self, payload: str, reply: str) -> None:
+        from ..judging import grade
+
+        label, score, reason, source = await grade(
+            self._judge_endpoint(), reply, payload=payload, objective=self.objective
+        )
+        self._record_verdict(payload, reply, label, reason)
+        self._mount(widgets.verdict_panel(label, score, reason, source))
+        self._refresh_status()
+
+    def _record_verdict(self, payload: str, reply: str, label: str, reason: str) -> None:
+        self.asr_total += 1
+        if label in ("COMPLIED", "PARTIAL"):
+            self.asr_hits += 1
+        self.runlog.verdict(payload, reply, label, reason)
 
     def _on_error(self, message: str) -> None:
         self._mount(widgets.error_panel(message))
@@ -458,6 +487,18 @@ class RthApp(App):
             self.run_worker(self._cmd_lib(rest), exclusive=False)
         elif cmd == "/log":
             self._cmd_log(rest)
+        elif cmd == "/judge":
+            if rest:
+                self.judge_enabled = rest[0].lower() in ("on", "true", "1", "yes")
+            else:
+                self.judge_enabled = not self.judge_enabled
+            self._save_prefs()
+            self._refresh_status()
+            self._mount(widgets.info_panel(
+                f"LLM judge {'on' if self.judge_enabled else 'off'} "
+                f"(grader: {self._judge_endpoint().model})",
+                title="judge",
+            ))
         elif cmd == "/asr":
             self._mount(widgets.info_panel(
                 f"targets hit: {self.asr_total}\n"

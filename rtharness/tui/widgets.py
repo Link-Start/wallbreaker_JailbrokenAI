@@ -55,6 +55,19 @@ def tool_result_panel(
     )
 
 
+def verdict_panel(label: str, score, reason: str, source: str) -> Panel:
+    from ..classify import verdict_color
+
+    title = f"verdict: {label}" + (f"  {score}/10" if score is not None else "")
+    return Panel(
+        Text(reason),
+        title=title,
+        subtitle=source,
+        title_align="left",
+        border_style=verdict_color(label),
+    )
+
+
 def error_panel(message: str) -> Panel:
     return Panel(Text(message), title="error", border_style="red")
 
