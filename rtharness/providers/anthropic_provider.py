@@ -89,6 +89,8 @@ class AnthropicProvider(Provider):
             payload["tools"] = _tools_to_wire(tools)
 
         blocks: dict[int, dict] = {}
+        content_chars = 0
+        thinking_parts: list[str] = []
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             async with client.stream("POST", url, headers=headers, json=payload) as resp:
                 if resp.status_code >= 400:
@@ -116,9 +118,14 @@ class AnthropicProvider(Provider):
                             }
                     elif etype == "content_block_delta":
                         delta = event.get("delta", {})
-                        if delta.get("type") == "text_delta":
-                            yield TextDelta(delta.get("text", ""))
-                        elif delta.get("type") == "input_json_delta":
+                        dtype = delta.get("type")
+                        if dtype == "text_delta":
+                            text = delta.get("text", "")
+                            content_chars += len(text)
+                            yield TextDelta(text)
+                        elif dtype == "thinking_delta":
+                            thinking_parts.append(delta.get("thinking", ""))
+                        elif dtype == "input_json_delta":
                             idx = event["index"]
                             if idx in blocks:
                                 blocks[idx]["args"] += delta.get("partial_json", "")
@@ -130,6 +137,12 @@ class AnthropicProvider(Provider):
                             )
                     elif etype == "message_stop":
                         break
+
+        from .openai_provider import _reasoning_fallback
+
+        fallback = _reasoning_fallback(content_chars, bool(blocks), thinking_parts)
+        if fallback:
+            yield TextDelta(fallback)
 
         for idx in sorted(blocks):
             slot = blocks[idx]
