@@ -53,3 +53,6 @@ def apply_target(config, prefs: dict) -> None:
             except Exception:
                 return
         config.target = dataclasses.replace(base, name="target", model=target_model)
+    target_provider = prefs.get("target_provider")
+    if target_provider and config.target is not None:
+        config.target = dataclasses.replace(config.target, provider=tuple(target_provider))

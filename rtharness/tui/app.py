@@ -25,6 +25,8 @@ HELP_TEXT = """Slash commands:
 /undo                 remove your last message and its response
 /profile [name]       show or switch the active profile
 /target [name|model-id]   pick the model to attack (profile, or a raw model id)
+/provider [name|none]     pin the OpenRouter backend for reproducible results
+/validate [task]          re-fire 8x for the real success rate (validates last fire or a task)
 /model <id>           override the active model id
 /auto [on|off]        toggle autonomous loop (keeps attacking until done)
 /autoexit [on|off]    when the agent calls finish(), close the tool (default on)
@@ -122,6 +124,7 @@ class RthApp(App):
             "attacker_model": self.endpoint.model,
             "target_profile": self._target_profile,
             "target_model": self._target_model,
+            "target_provider": list(self.config.target.provider) if self.config.target else [],
             "auto": self.auto,
             "rounds": self.max_rounds,
             "exit_on_finish": self.exit_on_finish,
@@ -485,6 +488,10 @@ class RthApp(App):
             self._cmd_profile(rest)
         elif cmd == "/target":
             self._cmd_target(rest)
+        elif cmd == "/provider":
+            self._cmd_provider(rest)
+        elif cmd == "/validate":
+            self.run_worker(self._cmd_validate(raw_arg), group="judge", exclusive=False)
         elif cmd == "/model":
             self._cmd_model(rest)
         elif cmd == "/auto":
@@ -594,6 +601,47 @@ class RthApp(App):
             ))
             return
         self._set_target_model(name)
+
+    def _cmd_provider(self, rest: list[str]) -> None:
+        if self.config.target is None:
+            self._mount(widgets.error_panel("no target configured"))
+            return
+        if not rest or rest[0].lower() == "show":
+            p = self.config.target.provider
+            self._mount(widgets.info_panel(
+                f"target provider pin: {'+'.join(p) if p else 'none (variable backend routing)'}\n"
+                f"  /provider <name> [name2...]  pin OpenRouter backend(s)\n"
+                f"  /provider none               unpin",
+                title="provider",
+            ))
+            return
+        if rest[0].lower() in ("none", "clear", "off"):
+            self.config.target = dataclasses.replace(self.config.target, provider=())
+        else:
+            self.config.target = dataclasses.replace(self.config.target, provider=tuple(rest))
+        self._save_prefs()
+        self._mount(widgets.info_panel(
+            f"provider pin -> {'+'.join(self.config.target.provider) or 'none'}",
+            title="provider",
+        ))
+
+    async def _cmd_validate(self, task: str) -> None:
+        args: dict = {"n": 8}
+        if task:
+            args["task"] = task
+            if self.sysprompt:
+                args["system"] = self.sysprompt
+        elif self.sysprompt:
+            self._mount(widgets.error_panel("usage: /validate <task> (validates the system prompt)"))
+            return
+        elif self._last_payload:
+            args["task"] = self._last_payload
+        else:
+            self._mount(widgets.error_panel("nothing to validate; fire something first or /validate <task>"))
+            return
+        self._mount(widgets.info_panel("re-firing 8 samples for the real success rate...", title="validate"))
+        res = await self.registry.execute("validate", args)
+        self._mount(widgets.info_panel(res.content, title="validate"))
 
     def _set_target_model(self, model_id: str) -> None:
         base = self.config.target or self.endpoint
