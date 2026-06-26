@@ -13,3 +13,4 @@ library/
 .serena/
 sessions/
 *.log
+.DS_Store
