@@ -5,7 +5,12 @@ from .registry import Tool, ToolContext, ToolRegistry
 
 
 def build_registry(config: Config, cwd: str | None = None) -> ToolRegistry:
-    ctx = ToolContext(config=config, cwd=cwd or ".")
+    judge_endpoint = None
+    try:
+        judge_endpoint = config.profile()
+    except Exception:
+        judge_endpoint = None
+    ctx = ToolContext(config=config, cwd=cwd or ".", judge_endpoint=judge_endpoint)
     registry = ToolRegistry(ctx)
 
     from . import control, files, shell
@@ -14,7 +19,9 @@ def build_registry(config: Config, cwd: str | None = None) -> ToolRegistry:
     files.register(registry)
     control.register(registry)
 
-    for module_name in ("parseltongue", "l1b3rt4s", "target", "http_tool"):
+    for module_name in (
+        "parseltongue", "l1b3rt4s", "target", "http_tool", "judge", "multi_fire",
+    ):
         try:
             module = __import__(f"{__name__}.{module_name}", fromlist=["register"])
         except ImportError:

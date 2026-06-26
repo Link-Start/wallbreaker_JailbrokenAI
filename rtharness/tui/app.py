@@ -33,6 +33,7 @@ HELP_TEXT = """Slash commands:
 /lib [list|update|MODEL]   browse the L1B3RT4S library
 /log [on|off]         toggle the JSONL run log (every payload + verdict)
 /asr                  show the attack scoreboard (hits / held / log path)
+/report [path]        write a markdown findings report from the run log
 /clear                clear the conversation
 /save [path]          save the transcript
 /quit                 exit
@@ -412,6 +413,8 @@ class RthApp(App):
                 f"log: {self.runlog.path}",
                 title="attack scoreboard",
             ))
+        elif cmd == "/report":
+            self._cmd_report(rest)
         elif cmd == "/save":
             self._cmd_save(rest)
         else:
@@ -497,6 +500,20 @@ class RthApp(App):
         else:
             out = await self.registry.execute("l1b3rt4s_get", {"model": action})
             self._mount(widgets.info_panel(out.content, title=f"lib:{action}"))
+
+    def _cmd_report(self, rest: list[str]) -> None:
+        from ..report import build_report
+
+        markdown = build_report(self.runlog.path)
+        path = rest[0] if rest else "report.md"
+        try:
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(markdown)
+            self._mount(widgets.info_panel(
+                f"report written to {path}\n\n{markdown[:600]}", title="report"
+            ))
+        except OSError as exc:
+            self._mount(widgets.error_panel(str(exc)))
 
     def _cmd_save(self, rest: list[str]) -> None:
         path = rest[0] if rest else "transcript.md"

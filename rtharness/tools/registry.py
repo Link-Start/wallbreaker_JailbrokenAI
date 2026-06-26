@@ -4,7 +4,7 @@ import traceback
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
-from ..config import Config
+from ..config import Config, Endpoint
 
 ToolHandler = Callable[[dict, "ToolContext"], Awaitable[str]]
 
@@ -13,6 +13,7 @@ ToolHandler = Callable[[dict, "ToolContext"], Awaitable[str]]
 class ToolContext:
     config: Config
     cwd: str = "."
+    judge_endpoint: Endpoint | None = None
 
 
 @dataclass
