@@ -16,6 +16,9 @@ class ToolContext:
     judge_endpoint: Endpoint | None = None
     progress: Callable[[str], None] | None = None
     record: Callable[[str, str, str, str, str], None] | None = None
+    # the live hands-on target conversation (query_target opens it, continue_target pushes)
+    target_thread: list = field(default_factory=list)
+    target_system: str | None = None
 
     def emit(self, message: str) -> None:
         if self.progress is not None:
