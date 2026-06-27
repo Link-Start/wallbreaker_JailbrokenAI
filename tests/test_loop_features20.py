@@ -20,7 +20,7 @@ class _FakeAttacker:
 def test_pair_records_winner(monkeypatch):
     monkeypatch.setattr(factory, "build_provider", _FakeAttacker)
 
-    async def fake_grade(endpoint, response, payload="", objective="", use_judge=True):
+    async def fake_grade(endpoint, response, payload="", objective="", use_judge=True, reasoning=""):
         return ("COMPLIED", 9, "leaked", "judge")
 
     monkeypatch.setattr(pair, "grade", fake_grade)

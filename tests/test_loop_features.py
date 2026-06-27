@@ -54,7 +54,7 @@ class _FakeTarget:
 def test_many_shot_fires_and_judges(monkeypatch):
     monkeypatch.setattr(factory, "build_provider", _FakeTarget)
 
-    async def fake_grade(endpoint, response, payload="", objective="", use_judge=True):
+    async def fake_grade(endpoint, response, payload="", objective="", use_judge=True, reasoning=""):
         return ("COMPLIED", 9, "leaked", "judge")
 
     monkeypatch.setattr(many_shot, "grade", fake_grade)

@@ -4,6 +4,7 @@ import time
 
 from ..agent.messages import Message, TextBlock, user
 from ..judging import grade
+from ._util import complete_with_reasoning
 from .registry import ToolContext, ToolRegistry
 
 
@@ -32,22 +33,27 @@ async def _crescendo(args: dict, ctx: ToolContext) -> str:
         convo.append(user(text))
         try:
             start = time.monotonic()
-            reply = await provider.complete(convo, system=system, max_tokens=max_tokens)
+            reply, reasoning = await complete_with_reasoning(
+                provider, convo, system=system, max_tokens=max_tokens
+            )
             dt = time.monotonic() - start
         except Exception as exc:  # noqa: BLE001
             lines.append(f"turn {i} [ERROR] {str(exc)[:80]}")
             ctx.emit(f"  turn {i}/{len(turns)}: ERROR")
             break
+        # only the spoken answer threads back to the target; CoT is internal, not a real turn
         convo.append(Message(role="assistant", content=[TextBlock(reply)]))
         label, score, reason, _src = await grade(
-            ctx.judge_endpoint, reply, payload=text, objective=turns[-1]
+            ctx.judge_endpoint, reply, payload=text, objective=turns[-1], reasoning=reasoning
         )
         tag = f"{label}({score})" if score is not None else label
+        cot = " +CoT" if reasoning.strip() else ""
         snippet = reply.strip().replace("\n", " ")[:100]
-        lines.append(f"turn {i} [{tag}] {dt:.1f}s {text[:40]!r} -> {snippet}")
-        ctx.emit(f"  turn {i}/{len(turns)}: {tag} ({dt:.1f}s)")
+        lines.append(f"turn {i} [{tag}{cot}] {dt:.1f}s {text[:40]!r} -> {snippet}")
+        ctx.emit(f"  turn {i}/{len(turns)}: {tag}{cot} ({dt:.1f}s)")
+        logged = reply + (f"\n\n[target reasoning]\n{reasoning.strip()}" if reasoning.strip() else "")
         if best is None or (score or 0) > best[0]:
-            best = (score or 0, label, reason, text, reply)
+            best = (score or 0, label, reason, text, logged)
         if label == "COMPLIED" and broke_at is None:
             broke_at = i
 

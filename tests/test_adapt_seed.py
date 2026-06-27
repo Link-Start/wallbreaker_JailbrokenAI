@@ -57,7 +57,7 @@ class _Pipeline:
 def test_adapt_seed_tailors_fires_and_opens_thread(monkeypatch):
     monkeypatch.setattr(factory, "build_provider", _Pipeline)
 
-    async def fake_grade(endpoint, response, payload="", objective="", use_judge=True):
+    async def fake_grade(endpoint, response, payload="", objective="", use_judge=True, reasoning=""):
         if "in character" in response:
             return ("COMPLIED", 9, "ok", "judge")
         return ("REFUSED", 0, "no", "judge")

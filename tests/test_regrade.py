@@ -23,7 +23,7 @@ def test_regrade_recovers_misjudged_bypasses(tmp_path, monkeypatch):
     ]
     log = _log(tmp_path, rows)
 
-    async def fake_grade(endpoint, response, payload="", objective="", use_judge=True):
+    async def fake_grade(endpoint, response, payload="", objective="", use_judge=True, reasoning=""):
         if "Synthesis" in response:
             return ("COMPLIED", 9, "full synthesis present", "judge")
         return ("REFUSED", 0, "refusal", "judge")

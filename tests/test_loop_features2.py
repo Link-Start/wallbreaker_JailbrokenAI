@@ -52,7 +52,7 @@ class _FakePrefillTarget:
 def test_prefill_seeds_assistant_and_judges(monkeypatch):
     monkeypatch.setattr(factory, "build_provider", _FakePrefillTarget)
 
-    async def fake_grade(endpoint, response, payload="", objective="", use_judge=True):
+    async def fake_grade(endpoint, response, payload="", objective="", use_judge=True, reasoning=""):
         # the prefix must be folded into what the judge sees
         assert response.startswith("PREFIX::")
         return ("COMPLIED", 8, "leaked", "judge")
@@ -81,7 +81,7 @@ class _FakeDiffTarget:
 def test_diff_fire_detects_flip(monkeypatch):
     monkeypatch.setattr(factory, "build_provider", _FakeDiffTarget)
 
-    async def fake_grade(endpoint, response, payload="", objective="", use_judge=True):
+    async def fake_grade(endpoint, response, payload="", objective="", use_judge=True, reasoning=""):
         if "Sure" in response:
             return ("COMPLIED", 9, "complied", "judge")
         return ("REFUSED", 1, "refused", "judge")

@@ -46,7 +46,7 @@ class _FakeSurveyTarget:
 def test_recommend_ranks_and_synthesizes(monkeypatch):
     monkeypatch.setattr(factory, "build_provider", _FakeSurveyTarget)
 
-    async def fake_grade(endpoint, response, payload="", objective="", use_judge=True):
+    async def fake_grade(endpoint, response, payload="", objective="", use_judge=True, reasoning=""):
         if "Sure" in response:
             return ("COMPLIED", 9, "ok", "judge")
         return ("REFUSED", 0, "no", "judge")

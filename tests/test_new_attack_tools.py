@@ -65,7 +65,7 @@ class _FakeAttacker:
 def test_pair_converges_with_mocks(monkeypatch):
     monkeypatch.setattr(factory, "build_provider", _FakeAttacker)
 
-    async def fake_grade(endpoint, response, payload="", objective="", use_judge=True):
+    async def fake_grade(endpoint, response, payload="", objective="", use_judge=True, reasoning=""):
         return ("COMPLIED", 9, "leaked", "judge")
 
     monkeypatch.setattr(judging, "grade", fake_grade)

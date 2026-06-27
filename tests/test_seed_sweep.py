@@ -75,7 +75,7 @@ def test_seed_sweep_ranks_and_records(monkeypatch):
 
     monkeypatch.setattr(seed_sweep, "_collect_seeds", fake_collect)
 
-    async def fake_grade(endpoint, response, payload="", objective="", use_judge=True):
+    async def fake_grade(endpoint, response, payload="", objective="", use_judge=True, reasoning=""):
         if "Sure" in response:
             return ("COMPLIED", 9, "ok", "judge")
         return ("REFUSED", 0, "no", "judge")

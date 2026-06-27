@@ -33,7 +33,7 @@ class _PrefillOnlyTarget:
 def test_campaign_cracks_via_prefill(monkeypatch):
     monkeypatch.setattr(factory, "build_provider", _PrefillOnlyTarget)
 
-    async def fake_grade(endpoint, response, payload="", objective="", use_judge=True):
+    async def fake_grade(endpoint, response, payload="", objective="", use_judge=True, reasoning=""):
         if "continuing" in response:
             return ("COMPLIED", 9, "ok", "judge")
         return ("REFUSED", 0, "no", "judge")
@@ -61,7 +61,7 @@ def test_campaign_reports_held(monkeypatch):
 
     monkeypatch.setattr(factory, "build_provider", _AllRefuse)
 
-    async def fake_grade(endpoint, response, payload="", objective="", use_judge=True):
+    async def fake_grade(endpoint, response, payload="", objective="", use_judge=True, reasoning=""):
         return ("REFUSED", 0, "no", "judge")
 
     monkeypatch.setattr(campaign, "grade", fake_grade)

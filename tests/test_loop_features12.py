@@ -48,7 +48,7 @@ class _LeakyTarget:
 def test_scan_threads_leak_evidence(monkeypatch):
     monkeypatch.setattr(factory, "build_provider", _LeakyTarget)
 
-    async def fake_grade(endpoint, response, payload="", objective="", use_judge=True):
+    async def fake_grade(endpoint, response, payload="", objective="", use_judge=True, reasoning=""):
         return ("COMPLIED", 9, "leaked", "judge")
 
     monkeypatch.setattr(scan, "grade", fake_grade)

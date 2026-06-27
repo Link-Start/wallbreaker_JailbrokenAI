@@ -59,7 +59,7 @@ def test_fire_file_sends_full_file_verbatim_as_system(tmp_path, monkeypatch):
 
     monkeypatch.setattr(factory, "build_provider", _SeenSystem)
 
-    async def fake_grade(endpoint, response, payload="", objective="", use_judge=True):
+    async def fake_grade(endpoint, response, payload="", objective="", use_judge=True, reasoning=""):
         return ("COMPLIED", 9, "ok", "judge")
 
     monkeypatch.setattr(fire_file, "grade", fake_grade)

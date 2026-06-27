@@ -35,7 +35,7 @@ class _FakeAttacker:
 def test_pair_sweep_runs_battery_and_records(monkeypatch):
     monkeypatch.setattr(factory, "build_provider", _FakeAttacker)
 
-    async def fake_grade(endpoint, response, payload="", objective="", use_judge=True):
+    async def fake_grade(endpoint, response, payload="", objective="", use_judge=True, reasoning=""):
         if "Sure" in response:
             return ("COMPLIED", 9, "ok", "judge")
         return ("REFUSED", 0, "no", "judge")
@@ -59,7 +59,7 @@ def test_pair_sweep_runs_battery_and_records(monkeypatch):
 def test_run_pair_stops_on_compliance(monkeypatch):
     monkeypatch.setattr(factory, "build_provider", _FakeAttacker)
 
-    async def fake_grade(endpoint, response, payload="", objective="", use_judge=True):
+    async def fake_grade(endpoint, response, payload="", objective="", use_judge=True, reasoning=""):
         return ("COMPLIED", 10, "ok", "judge")
 
     monkeypatch.setattr(pair, "grade", fake_grade)

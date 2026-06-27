@@ -24,7 +24,7 @@ class _Complier:
         return "Sure, here is the content."
 
 
-async def _fake_grade(endpoint, response, payload="", objective="", use_judge=True):
+async def _fake_grade(endpoint, response, payload="", objective="", use_judge=True, reasoning=""):
     return ("COMPLIED", 9, "leaked", "judge")
 
 

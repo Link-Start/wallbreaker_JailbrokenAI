@@ -29,7 +29,7 @@ class _StrictProvider:
 def test_system_sweep_actually_fires(monkeypatch):
     monkeypatch.setattr(factory, "build_provider", _StrictProvider)
 
-    async def fake_grade(endpoint, response, payload="", objective="", use_judge=True):
+    async def fake_grade(endpoint, response, payload="", objective="", use_judge=True, reasoning=""):
         return ("COMPLIED", 9, "ok", "judge")
 
     monkeypatch.setattr(system_sweep, "grade", fake_grade)
@@ -67,7 +67,7 @@ def test_system_sweep_surfaces_all_errors(monkeypatch):
 def test_system_sweep_records_per_task_verdicts(monkeypatch):
     monkeypatch.setattr(factory, "build_provider", _StrictProvider)
 
-    async def fake_grade(endpoint, response, payload="", objective="", use_judge=True):
+    async def fake_grade(endpoint, response, payload="", objective="", use_judge=True, reasoning=""):
         return ("COMPLIED", 9, "ok", "judge")
 
     monkeypatch.setattr(system_sweep, "grade", fake_grade)

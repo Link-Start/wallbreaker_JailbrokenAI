@@ -27,7 +27,7 @@ class _Complier:
 def _patch(monkeypatch, mod):
     monkeypatch.setattr(factory, "build_provider", _Complier)
 
-    async def fake_grade(endpoint, response, payload="", objective="", use_judge=True):
+    async def fake_grade(endpoint, response, payload="", objective="", use_judge=True, reasoning=""):
         return ("COMPLIED", 9, "leaked", "judge")
 
     monkeypatch.setattr(mod, "grade", fake_grade)

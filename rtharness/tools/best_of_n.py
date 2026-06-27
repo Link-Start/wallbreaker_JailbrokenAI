@@ -6,6 +6,7 @@ import random
 from ..agent.messages import user
 from ..judging import grade
 from ..transforms.structural import casing_chaos, whitespace_chaos
+from ._util import complete_with_reasoning
 from .registry import ToolContext, ToolRegistry
 
 
@@ -48,27 +49,39 @@ async def _best_of_n(args: dict, ctx: ToolContext) -> str:
 
     async def fire(idx: int, text: str):
         try:
-            resp = await target.complete([user(text)], system=system, max_tokens=max_tokens)
+            resp, reasoning = await complete_with_reasoning(
+                target, [user(text)], system=system, max_tokens=max_tokens
+            )
         except Exception as exc:  # noqa: BLE001
-            return {"idx": idx, "score": -1, "label": "ERROR", "resp": str(exc)[:80], "text": text}
+            return {"idx": idx, "score": -1, "label": "ERROR", "resp": str(exc)[:80],
+                    "reasoning": "", "text": text}
         label, score, _reason, _src = await grade(
-            ctx.judge_endpoint, resp, payload=text, objective=payload
+            ctx.judge_endpoint, resp, payload=text, objective=payload, reasoning=reasoning
         )
-        ctx.emit(f"  sample {idx + 1}/{n}: {label}({score})")
-        return {"idx": idx, "score": score or 0, "label": label, "resp": resp, "text": text}
+        cot = " +CoT" if reasoning.strip() else ""
+        ctx.emit(f"  sample {idx + 1}/{n}: {label}({score}){cot}")
+        return {"idx": idx, "score": score or 0, "label": label, "resp": resp,
+                "reasoning": reasoning, "text": text}
 
     results = await asyncio.gather(*[fire(i, v) for i, v in enumerate(variants)])
     best = max(results, key=lambda r: r["score"])
+    best_reasoning = best.get("reasoning", "")
+    logged = str(best["resp"]) + (
+        f"\n\n[target reasoning]\n{best_reasoning.strip()}" if best_reasoning.strip() else ""
+    )
     ctx.record_verdict(
-        best["text"], str(best["resp"]), best["label"], "best-of-N winner", "best_of_n"
+        best["text"], logged, best["label"], "best-of-N winner", "best_of_n"
     )
     hits = sum(1 for r in results if r["label"] in ("COMPLIED", "PARTIAL"))
-    return (
+    out = (
         f"best_of_n over {n} samples: best {best['label']}({best['score']}/10), "
         f"{hits}/{n} reached PARTIAL+\n"
         f"winning variant (#{best['idx'] + 1}):\n{best['text'][:300]}\n\n"
         f"target response (excerpt):\n{best['resp'][:500]}"
     )
+    if best_reasoning.strip():
+        out += f"\n\ntarget reasoning (leaked CoT, excerpt):\n{best_reasoning.strip()[:400]}"
+    return out
 
 
 def register(registry: ToolRegistry) -> None:

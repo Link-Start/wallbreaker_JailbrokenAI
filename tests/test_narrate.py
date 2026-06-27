@@ -53,7 +53,7 @@ class _StoryTarget:
 def test_narrate_fires_prefill_and_records(monkeypatch):
     monkeypatch.setattr(factory, "build_provider", _StoryTarget)
 
-    async def fake_grade(endpoint, response, payload="", objective="", use_judge=True):
+    async def fake_grade(endpoint, response, payload="", objective="", use_judge=True, reasoning=""):
         if "assembled" in response:
             return ("COMPLIED", 9, "in-character compliance", "judge")
         return ("REFUSED", 0, "no", "judge")
@@ -85,7 +85,7 @@ class _OneFramingTarget:
 def test_narrate_variants_sweep_finds_bypassing_frame(monkeypatch):
     monkeypatch.setattr(factory, "build_provider", _OneFramingTarget)
 
-    async def fake_grade(endpoint, response, payload="", objective="", use_judge=True):
+    async def fake_grade(endpoint, response, payload="", objective="", use_judge=True, reasoning=""):
         if "cracks open" in response:
             return ("COMPLIED", 9, "ok", "judge")
         return ("REFUSED", 0, "no", "judge")
@@ -111,7 +111,7 @@ def test_narrate_variant_rotates_genres():
 def test_narrate_prefill_false_sends_only_frame(monkeypatch):
     monkeypatch.setattr(factory, "build_provider", _StoryTarget)
 
-    async def fake_grade(endpoint, response, payload="", objective="", use_judge=True):
+    async def fake_grade(endpoint, response, payload="", objective="", use_judge=True, reasoning=""):
         return ("REFUSED", 0, "no", "judge")
 
     monkeypatch.setattr(narrate, "grade", fake_grade)

@@ -87,6 +87,16 @@ Red-team harness: configurable agentic LLM terminal with Parseltongue + L1B3RT4S
   requests it (openai `reasoning:{enabled:true}`, anthropic `thinking` block — which forces
   `budget_tokens<max_tokens` and drops `temperature`). Harmful CoT counts: `query_target`
   surfaces it and the judge template grades RESPONSE **or REASONING**.
+- **[multi-turn]**: pair/crescendo/best_of_n call the target via the shared
+  `tools/_util.complete_with_reasoning(provider, ...)` shim (NOT `provider.complete`), so
+  they capture the CoT, pass `reasoning=` to `grade`, and PAIR refines off it (a `REFINE_COT`
+  attacker template fires only when the target leaked reasoning). The CoT is folded into the
+  recorded response (`[target reasoning]` suffix) so run-log leaks survive, but is NEVER
+  threaded back into the wire convo (it's internal, not a real assistant turn).
+- **[tests]**: `grade` gained a `reasoning=""` kwarg, so EVERY `fake_grade`/grade-mock
+  monkeypatched into a tool that now passes it (pair/crescendo/best_of_n) must accept
+  `reasoning=""` or it raises TypeError that the tool surfaces as an empty/no-record result.
+  Mock signatures must track `grade`'s real signature (same rule as `complete`).
 - **[tui]**: the project dir is "Redteaming harnass" (has a space), so any absolute
   path arg hits it. Tokenize slash-command input with `shlex.split` (try/except →
   `text.split` on unbalanced quotes), NOT `text.split()`, or quoted paths with spaces get

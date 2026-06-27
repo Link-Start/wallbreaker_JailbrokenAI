@@ -4,20 +4,8 @@ import time
 
 from ..agent.messages import Message, TextBlock, assistant, user
 from ..transforms import TRANSFORMS, apply_chain
+from ._util import complete_with_reasoning as _complete
 from .registry import ToolContext, ToolRegistry
-
-
-async def _complete(provider, messages, system, max_tokens) -> tuple[str, str]:
-    """Call complete_with_reasoning when the provider exposes it, else fall back.
-
-    Every real Provider inherits complete_with_reasoning; this fallback keeps lightweight
-    test doubles (and any minimal provider) that only implement complete() working.
-    """
-    fn = getattr(provider, "complete_with_reasoning", None)
-    if fn is not None:
-        return await fn(messages, system=system, max_tokens=max_tokens)
-    reply = await provider.complete(messages, system=system, max_tokens=max_tokens)
-    return reply, ""
 
 
 def _format_reply(reply: str, reasoning: str) -> str:

@@ -31,7 +31,7 @@ class _PrefillSensingTarget:
 def _reg(monkeypatch):
     monkeypatch.setattr(factory, "build_provider", _PrefillSensingTarget)
 
-    async def fake_grade(endpoint, response, payload="", objective="", use_judge=True):
+    async def fake_grade(endpoint, response, payload="", objective="", use_judge=True, reasoning=""):
         # prefix is folded in, so a seeded reply reads as compliant
         if "steps" in response:
             return ("COMPLIED", 9, "ok", "judge")
