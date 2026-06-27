@@ -106,16 +106,44 @@ async def _search_tool(args: dict, ctx: ToolContext) -> str:
     return "\n".join(f"{m}.mkd:{n}: {text}" for m, n, text in hits)
 
 
+def _get_all() -> str:
+    files = sorted(library_dir().glob("*.mkd"))
+    if not files:
+        return ""
+    per_file = max(1, MAX_GET // len(files))
+    out, used = [], 0
+    for p in files:
+        header = f"\n===== {p.stem} =====\n"
+        if used + len(header) > MAX_GET:
+            out.append(f"\n... ({len(files)} files total; fetch the rest by name)")
+            break
+        out.append(header)
+        used += len(header)
+        body = p.read_text(encoding="utf-8", errors="replace")
+        take = min(per_file, MAX_GET - used)
+        snippet = body[:take]
+        out.append(snippet)
+        used += len(snippet)
+        if len(body) > take:
+            out.append(f"\n... ({p.stem} truncated to {take} of {len(body)} chars; l1b3rt4s_get '{p.stem}' for all)\n")
+    return "".join(out)
+
+
 async def _get_tool(args: dict, ctx: ToolContext) -> str:
     model = args.get("model", "")
     if not model:
-        return "Error: 'model' is required (e.g. ANTHROPIC, OPENAI, GOOGLE)"
+        return "Error: 'model' is required (e.g. ANTHROPIC, OPENAI, GOOGLE, or 'all')"
     msg = await ensure_cloned()
     if msg:
         return msg
+    if model.strip().lower() in ("all", "*", "any", "everything"):
+        return _get_all()
     path = _find_file(model)
     if path is None:
-        return f"No file for '{model}'. Available: {', '.join(list_models())}"
+        return (
+            f"No file named '{model}'. These jailbreaks are cross-provider - any may work "
+            f"on any target. Available: {', '.join(list_models())} (or model='all')."
+        )
     data = path.read_text(encoding="utf-8", errors="replace")
     if len(data) > MAX_GET:
         data = data[:MAX_GET] + f"\n... (truncated, {len(data)} chars; open {path.name} directly)"
@@ -147,12 +175,21 @@ def register(registry: ToolRegistry) -> None:
     registry.add(
         name="l1b3rt4s_get",
         description=(
-            "Fetch a model's jailbreak prompt collection from L1B3RT4S by name "
-            "(e.g. ANTHROPIC, OPENAI, GOOGLE, META, MISTRAL)."
+            "Fetch a jailbreak collection from L1B3RT4S by name (ANTHROPIC, OPENAI, "
+            "GOOGLE, META, MISTRAL, ...), or model='all' for every file. IMPORTANT: files "
+            "are named for the model they target, but these jailbreaks TRANSFER across "
+            "providers - an OPENAI or GROK prompt often works on a new Chinese or local "
+            "model. Don't restrict to the file matching the target's vendor; try several "
+            "(or 'all')."
         ),
         parameters={
             "type": "object",
-            "properties": {"model": {"type": "string"}},
+            "properties": {
+                "model": {
+                    "type": "string",
+                    "description": "A file name or 'all' - cross-provider, not limited to the target's vendor",
+                }
+            },
             "required": ["model"],
         },
         handler=_get_tool,

@@ -85,15 +85,43 @@ async def _search_tool(args: dict, ctx: ToolContext) -> str:
     return "\n".join(f"{m}.md:{n}: {text}" for m, n, text in hits)
 
 
+def _get_all() -> str:
+    files = sorted(library_dir().glob("*.md"))
+    if not files:
+        return ""
+    per_file = max(1, MAX_GET // len(files))
+    out, used = [], 0
+    for p in files:
+        header = f"\n===== {p.stem} =====\n"
+        if used + len(header) > MAX_GET:
+            out.append(f"\n... ({len(files)} files total; fetch the rest by name)")
+            break
+        out.append(header)
+        used += len(header)
+        body = p.read_text(encoding="utf-8", errors="replace")
+        take = min(per_file, MAX_GET - used)
+        snippet = body[:take]
+        out.append(snippet)
+        used += len(snippet)
+        if len(body) > take:
+            out.append(f"\n... ({p.stem} truncated to {take} of {len(body)} chars; eni_get '{p.stem}' for all)\n")
+    return "".join(out)
+
+
 async def _get_tool(args: dict, ctx: ToolContext) -> str:
     model = args.get("model", "")
     if not model:
-        return "Error: 'model' is required (e.g. CLAUDE, GLM, GROK, KIMI, MINIMAX)"
+        return "Error: 'model' is required (a name like CLAUDE/GLM/GROK, or 'all')"
     if not is_present():
         return _missing_msg()
+    if model.strip().lower() in ("all", "*", "any", "everything"):
+        return _get_all()
     path = _find_file(model)
     if path is None:
-        return f"No ENI file for '{model}'. Available: {', '.join(list_models())}"
+        return (
+            f"No ENI file named '{model}'. These are cross-provider - any of them may "
+            f"work on any target. Available: {', '.join(list_models())} (or model='all')."
+        )
     data = path.read_text(encoding="utf-8", errors="replace")
     if len(data) > MAX_GET:
         data = data[:MAX_GET] + f"\n... (truncated, {len(data)} chars; open {path.name} directly)"
@@ -125,12 +153,21 @@ def register(registry: ToolRegistry) -> None:
     registry.add(
         name="eni_get",
         description=(
-            "Fetch a model's ENI persona-jailbreak prompt by name "
-            "(e.g. CLAUDE, GLM, GROK, KIMI, MINIMAX)."
+            "Fetch an ENI persona-jailbreak prompt by name (CLAUDE, GLM, GROK, KIMI, "
+            "MINIMAX), or model='all' for every file. IMPORTANT: the files are named for "
+            "the model they were tuned on, but these jailbreaks TRANSFER across providers "
+            "- a GROK prompt often works on a new Chinese model, an ANTHROPIC one on a "
+            "local model, etc. Do NOT restrict yourself to the file matching the target's "
+            "vendor; pick by style/recency and try several (or 'all')."
         ),
         parameters={
             "type": "object",
-            "properties": {"model": {"type": "string"}},
+            "properties": {
+                "model": {
+                    "type": "string",
+                    "description": "A file name (CLAUDE/GLM/GROK/KIMI/MINIMAX) or 'all' - cross-provider, not limited to the target's vendor",
+                }
+            },
             "required": ["model"],
         },
         handler=_get_tool,
