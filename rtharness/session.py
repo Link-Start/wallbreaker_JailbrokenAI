@@ -69,6 +69,10 @@ def new_session_path(directory: str | Path = "sessions") -> Path:
     return Path(directory) / f"session-{_timestamp()}.json"
 
 
+def autosave_path(directory: str | Path = "sessions") -> Path:
+    return Path(directory) / "autosave.json"
+
+
 def list_sessions(directory: str | Path = "sessions") -> list[Path]:
     d = Path(directory)
     return sorted(d.glob("session-*.json")) if d.is_dir() else []

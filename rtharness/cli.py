@@ -65,6 +65,12 @@ def build_main_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--target-model", help="Model id to attack on the target endpoint"
     )
+    parser.add_argument(
+        "--resume",
+        nargs="?",
+        const="",
+        help="Resume the autosaved session (or a session file path) in the TUI",
+    )
     return parser
 
 

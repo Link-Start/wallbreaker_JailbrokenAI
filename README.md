@@ -75,7 +75,11 @@ model    = "openai/gpt-4o-mini"
 rth                       # TUI on default_profile
 rth --profile openrouter
 rth --auto "objective..." # one-shot autonomous run
+rth --resume              # reopen the autosaved session (survives a crash/Ctrl+C)
 ```
+
+The TUI autosaves the whole engagement to `sessions/autosave.json` after every turn;
+`--resume` reopens it (or pass a specific session file: `rth --resume mysession.json`).
 
 ## Picking the model to attack
 

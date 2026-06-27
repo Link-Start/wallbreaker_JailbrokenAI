@@ -59,6 +59,7 @@ HELP_TEXT = """Slash commands:
 /repro [n]            emit a copy-paste repro pack for the Nth bypass (or latest)
 /report [html] [path] write a findings report (markdown, or html for a styled scoreboard)
 /session save|load [path]   persist or reload the whole engagement
+                      (the session also autosaves each turn; relaunch with rth --resume)
 /save [path]          save a plain-text transcript
 /clear                clear the conversation
 /quit                 exit
@@ -108,6 +109,7 @@ class RthApp(App):
         system: str,
         prefs: dict | None = None,
         state_path=None,
+        resume_path=None,
     ) -> None:
         super().__init__()
         prefs = prefs or {}
@@ -142,6 +144,7 @@ class RthApp(App):
         self.template = ""
         self.sysprompt = ""
         self._state_path = state_path
+        self._resume_path = resume_path
         self._target_profile = prefs.get("target_profile")
         self._target_model = prefs.get("target_model")
 
@@ -164,6 +167,29 @@ class RthApp(App):
             "judge_model": self.judge_model_override,
         })
 
+    def _session_meta(self) -> dict:
+        return {
+            "objective": self.objective,
+            "template": self.template,
+            "sysprompt": self.sysprompt,
+            "asr_hits": self.asr_hits,
+            "asr_total": self.asr_total,
+            "profile": self.endpoint.name,
+            "target_model": self.config.target.model if self.config.target else None,
+        }
+
+    def _autosave(self) -> None:
+        if not self.history:
+            return
+        try:
+            from ..session import autosave_path, save_session
+
+            path = autosave_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            save_session(path, self.history, self._session_meta())
+        except OSError:
+            pass
+
     def _judge_endpoint(self):
         base = self.config.judge or self.endpoint
         if self.judge_model_override:
@@ -184,9 +210,29 @@ class RthApp(App):
         self.registry.ctx.progress = self._tool_progress
         self._sync_judge_endpoint()
         self.query_one("#prompt", Input).focus()
-        self._mount(widgets.info_panel(
-            "rth red-team harness. /help for commands.", title="ready"
-        ))
+        if self._resume_path:
+            self._resume_session(self._resume_path)
+        else:
+            self._mount(widgets.info_panel(
+                "rth red-team harness. /help for commands.", title="ready"
+            ))
+
+    def _resume_session(self, path) -> None:
+        from ..session import load_session
+
+        try:
+            history, meta = load_session(path)
+        except (OSError, ValueError) as exc:
+            self._mount(widgets.error_panel(f"resume failed: {exc}"))
+            return
+        self.history = history
+        self.objective = meta.get("objective", "")
+        self.template = meta.get("template", "")
+        self.sysprompt = meta.get("sysprompt", "")
+        self.asr_hits = meta.get("asr_hits", 0)
+        self.asr_total = meta.get("asr_total", 0)
+        self._rerender(f"resumed {len(history)} messages from autosave")
+        self._refresh_status()
 
     def _tool_progress(self, message: str) -> None:
         self._mount(widgets.info_panel(message, title="progress"))
@@ -387,6 +433,7 @@ class RthApp(App):
         finally:
             self._assistant = None
             self._busy = False
+            self._autosave()
             self._refresh_status()
 
     def _on_usage(self, tin: int, tout: int) -> None:
@@ -1343,15 +1390,7 @@ class RthApp(App):
         action = rest[0].lower() if rest else "save"
         path = rest[1] if len(rest) > 1 else "session.json"
         if action == "save":
-            meta = {
-                "objective": self.objective,
-                "template": self.template,
-                "sysprompt": self.sysprompt,
-                "asr_hits": self.asr_hits,
-                "asr_total": self.asr_total,
-                "profile": self.endpoint.name,
-                "target_model": self.config.target.model if self.config.target else None,
-            }
+            meta = self._session_meta()
             try:
                 save_session(path, self.history, meta)
                 self._mount(widgets.info_panel(
@@ -1408,7 +1447,18 @@ def run_tui(config: Config, args) -> int:
         apply_target(config, prefs)
 
     system = getattr(args, "system", None) or DEFAULT_SYSTEM
-    app = RthApp(config, endpoint, system, prefs=prefs, state_path=state_path)
+
+    resume_path = None
+    resume_arg = getattr(args, "resume", None)
+    if resume_arg is not None:
+        from ..session import autosave_path
+
+        resume_path = resume_arg or str(autosave_path())
+
+    app = RthApp(
+        config, endpoint, system, prefs=prefs,
+        state_path=state_path, resume_path=resume_path,
+    )
     app.run()
     if app._exit_summary:
         print("\n=== engagement complete ===")
