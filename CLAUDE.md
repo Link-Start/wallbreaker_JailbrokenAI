@@ -86,3 +86,14 @@ Red-team harness: configurable agentic LLM terminal with Parseltongue + L1B3RT4S
   lifecycle inside ONE dedicated task and serves `call_tool` via an `asyncio.Queue` (futures
   resolved in that task). Proxied tools degrade gracefully: a server that won't start is
   skipped with a progress note, never breaking `build_registry`/startup.
+- **[tui]**: changing the TUI layout has two hard test contracts. (1) ~10 tests assert
+  `len(app.query_one("#log").children)` — keep `#log` as the `VerticalScroll` and have
+  `_mount` add exactly ONE `Static` child per call (no extra wrappers, no per-frame mounts).
+  (2) `test_loop_features2`/`test_tui_ui` assert `_status_text()` contains `@WandB` and
+  `last=COMPLIED` — keep that method emitting those substrings; the header/sidebar widgets
+  read structured fields via `set_fields`/`set_stats`, they do NOT replace `_status_text`.
+- **[tui]**: Rich does NOT resolve Textual CSS `$variables`. Use literal hex (the `PALETTE`
+  dict in `tui/theme.py`) inside Rich `Text`/`Panel` styles; reserve `$primary`/`$panel`/etc.
+  for `tui/app.tcss` only. Colors live once in `theme.py` (Theme + PALETTE) so chrome and
+  panels stay in sync. The header spinner is a `set_interval` frame counter started in
+  `set_busy(True)` and stopped in `set_busy(False)`/`on_unmount` — never mounts log rows.
