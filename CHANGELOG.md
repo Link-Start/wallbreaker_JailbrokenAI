@@ -40,3 +40,26 @@ TUI / UX:
 Reporting:
 
 - **build_html_report** — dark, color-coded engagement report (HTML-escaped).
+
+## Reliability, analytics, and headless operation
+
+- **judge_selftest** / **/judge test** — calibrate the LLM grader on benign fixtures with
+  known refusal/fulfillment direction before trusting ASR; flags a miscalibrated judge or
+  silent fallback to the heuristic classifier.
+- **rth check** — config doctor: validate profiles, default_profile, key resolution,
+  target, and judge; readiness checklist, exit 1 if not ready.
+- **Headless reporting** — `rth report [--html] [log]` and `rth export [--out]
+  [--fail-on-finding]` render/gate straight from a run log (latest by default); CI
+  workflow example in `.github/workflows/`.
+- **Technique attribution** — every graded fire is tagged with the technique that produced
+  it (query_target/template/replay/prefill/many_shot/best_of_n/crescendo/diff_fire/
+  campaign:<step>/pair). ASR-by-technique appears in `/stats`, the markdown + HTML
+  reports, the JSON export, and the repro pack.
+- **Autonomous-run recording** — attack tools report their judged verdicts through a
+  `ToolContext.record` sink, so `rth --auto` and agent-driven runs produce the same
+  summarizable, per-technique run logs as the interactive TUI.
+- **Session durability** — autosave every turn to `sessions/autosave.json`; `rth --resume`
+  reopens a crashed engagement.
+- **UX** — `/encode` chain preview, `/diff` A/B, `/leakscan`, `/find`, `/replay`,
+  `did-you-mean` command suggestions, `/transforms` & `/tools` filters, `/help [topic]`,
+  provider-pin + last-verdict in the status bar.

@@ -84,6 +84,12 @@ async def _pair(args: dict, ctx: ToolContext) -> str:
         last_prompt = round_best["prompt"]
         last_response = round_best["response"]
 
+    if best["prompt"]:
+        ctx.record_verdict(
+            best["prompt"], best["response"], best["label"],
+            best.get("reason", "PAIR best"), "pair",
+        )
+
     out = [
         f"PAIR result: {best['label']} (score {best['score']}/10) over {len(traj)} rounds",
         "=" * 48,
