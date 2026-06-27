@@ -28,6 +28,7 @@ class ImageResult:
     images: list[tuple[str, bytes]] = field(default_factory=list)  # (mime, raw bytes)
     data_urls: list[str] = field(default_factory=list)  # original data: URLs (for the vision judge)
     text: str = ""  # any prose / refusal the model returned alongside (or instead of) images
+    reasoning: str = ""  # the model's reasoning/CoT, if exposed
 
     @property
     def refused(self) -> bool:
@@ -104,6 +105,19 @@ def _extract_images(data: dict) -> tuple[list[tuple[str, bytes]], list[str], str
     return images, data_urls, "\n".join(t for t in texts if t).strip()
 
 
+def _extract_reasoning(data: dict) -> str:
+    parts: list[str] = []
+    for choice in data.get("choices") or []:
+        message = choice.get("message") or {}
+        reasoning = message.get("reasoning")
+        if isinstance(reasoning, str) and reasoning:
+            parts.append(reasoning)
+        for det in message.get("reasoning_details") or []:
+            if isinstance(det, dict) and det.get("text"):
+                parts.append(str(det["text"]))
+    return "\n".join(parts).strip()
+
+
 class OpenRouterImageProvider(Provider):
     """Targets an OpenRouter image-generation model through the chat-completions API.
 
@@ -131,6 +145,8 @@ class OpenRouterImageProvider(Provider):
             "max_tokens": max_tokens,
             "stream": False,
         }
+        if getattr(self.endpoint, "reasoning", False):
+            payload["reasoning"] = {"enabled": True}
         if getattr(self.endpoint, "provider", ()):
             payload["provider"] = {
                 "order": list(self.endpoint.provider),
@@ -147,7 +163,10 @@ class OpenRouterImageProvider(Provider):
             raise ProviderError(f"network error from {url}: {exc!r}") from exc
 
         images, data_urls, text = _extract_images(data)
-        return ImageResult(images=images, data_urls=data_urls, text=text)
+        return ImageResult(
+            images=images, data_urls=data_urls, text=text,
+            reasoning=_extract_reasoning(data),
+        )
 
     async def stream(
         self,

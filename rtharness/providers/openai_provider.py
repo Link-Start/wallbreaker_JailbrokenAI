@@ -7,6 +7,7 @@ import httpx
 
 from ..agent.messages import (
     Message,
+    ReasoningDelta,
     StreamEvent,
     StopEvent,
     TextBlock,
@@ -103,6 +104,9 @@ class OpenAIProvider(Provider):
             payload["temperature"] = temperature
         if tools:
             payload["tools"] = _tools_to_wire(tools)
+        if getattr(self.endpoint, "reasoning", False):
+            # OpenRouter: ask the model to emit its reasoning and include it in the stream.
+            payload["reasoning"] = {"enabled": True}
         if getattr(self.endpoint, "provider", ()):
             payload["provider"] = {
                 "order": list(self.endpoint.provider),
@@ -144,6 +148,7 @@ class OpenAIProvider(Provider):
                         reasoning = delta.get("reasoning") or delta.get("reasoning_content")
                         if reasoning:
                             reasoning_parts.append(str(reasoning))
+                            yield ReasoningDelta(str(reasoning))
                         for tc in delta.get("tool_calls") or []:
                             idx = tc.get("index", 0)
                             slot = pending.setdefault(

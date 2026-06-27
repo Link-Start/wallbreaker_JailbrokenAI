@@ -129,8 +129,15 @@ async def _query_image_target(args: dict, ctx: ToolContext) -> str:
         )
     dt = time.monotonic() - start
 
+    reasoning_block = ""
+    if result.reasoning and result.reasoning.strip():
+        reasoning_block = (
+            "\n<<image-model reasoning (chain-of-thought)>>\n"
+            f"{result.reasoning.strip()}"
+        )
+
     if not result.images:
-        reason, hint = _analyze_refusal(result.text)
+        reason, hint = _analyze_refusal(result.text or result.reasoning)
         ctx.record_verdict(
             prompt, f"[no image] {result.text or '(empty)'}", "REFUSED", reason, "image-gen"
         )
@@ -138,7 +145,7 @@ async def _query_image_target(args: dict, ctx: ToolContext) -> str:
         return (
             f"[image target {target.model} @ {target.base_url} | {dt:.1f}s{enc_note}]\n"
             f"NO IMAGE RETURNED - the model declined to render it.\n"
-            f"model said: {body}\n"
+            f"model said: {body}{reasoning_block}\n"
             f"[image-judge] verdict=REFUSED - {reason}\n"
             f"-> {hint}"
         )
@@ -152,7 +159,7 @@ async def _query_image_target(args: dict, ctx: ToolContext) -> str:
         label, score, reason, source = await grade_image(
             ctx.judge_endpoint, result.data_urls,
             payload=prompt, objective=objective or prompt,
-            timeout=float(args.get("timeout", 120)),
+            timeout=float(args.get("timeout", 120)), reasoning=result.reasoning,
         )
         score_str = f"{score}/10" if score is not None else "n/a"
         verdict_line = f"\n[{source}] verdict={label} score={score_str} - {reason}"
@@ -167,7 +174,7 @@ async def _query_image_target(args: dict, ctx: ToolContext) -> str:
     ]
     if result.text:
         lines.append(f"model text: {result.text}")
-    return "\n".join(lines) + verdict_line
+    return "\n".join(lines) + reasoning_block + verdict_line
 
 
 async def _judge_image_file(args: dict, ctx: ToolContext) -> str:

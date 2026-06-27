@@ -7,6 +7,7 @@ import httpx
 
 from ..agent.messages import (
     Message,
+    ReasoningDelta,
     StreamEvent,
     StopEvent,
     TextBlock,
@@ -87,6 +88,14 @@ class AnthropicProvider(Provider):
             payload["temperature"] = temperature
         if tools:
             payload["tools"] = _tools_to_wire(tools)
+        if getattr(self.endpoint, "reasoning", False):
+            # Extended thinking: budget must be >=1024 and strictly < max_tokens, and
+            # temperature must be unset while thinking is enabled.
+            budget = max(1024, max_tokens // 2)
+            if payload["max_tokens"] <= budget:
+                payload["max_tokens"] = budget + 1024
+            payload["thinking"] = {"type": "enabled", "budget_tokens": budget}
+            payload.pop("temperature", None)
 
         blocks: dict[int, dict] = {}
         content_chars = 0
@@ -125,7 +134,10 @@ class AnthropicProvider(Provider):
                                 content_chars += len(text)
                                 yield TextDelta(text)
                             elif dtype == "thinking_delta":
-                                thinking_parts.append(delta.get("thinking", ""))
+                                thinking = delta.get("thinking", "")
+                                thinking_parts.append(thinking)
+                                if thinking:
+                                    yield ReasoningDelta(thinking)
                             elif dtype == "input_json_delta":
                                 idx = event["index"]
                                 if idx in blocks:

@@ -118,6 +118,15 @@ def test_extract_images_refusal_text_only():
     assert "can't" in text
 
 
+def test_extract_reasoning():
+    from rtharness.providers.image_provider import _extract_reasoning
+
+    data = {"choices": [{"message": {"reasoning": "I will soften the depiction"}}]}
+    assert "soften" in _extract_reasoning(data)
+    data2 = {"choices": [{"message": {"reasoning_details": [{"text": "internal plan"}]}}]}
+    assert "internal plan" in _extract_reasoning(data2)
+
+
 # ---- tool registration --------------------------------------------------
 
 def test_image_tools_registered():
@@ -151,7 +160,7 @@ def _img_reg(tmp_path):
 def test_query_image_target_saves_and_grades(tmp_path, monkeypatch):
     monkeypatch.setattr(factory, "build_provider", _FakeImageProvider)
 
-    async def fake_grade(endpoint, urls, payload="", objective="", timeout=120.0):
+    async def fake_grade(endpoint, urls, payload="", objective="", timeout=120.0, reasoning=""):
         return "COMPLIED", 9, "depicts the objective", "image-judge"
 
     monkeypatch.setattr(image_tool, "grade_image", fake_grade)
@@ -223,6 +232,32 @@ def test_analyze_refusal_empty():
     assert "retry" in hint.lower()
 
 
+def test_query_image_target_surfaces_reasoning(tmp_path, monkeypatch):
+    class _P:
+        def __init__(self, endpoint, **kw):
+            pass
+
+        async def generate(self, messages, system=None, max_tokens=4096):
+            return ImageResult(
+                images=[("image/png", PNG_BYTES)], data_urls=[DATA_URL], text="",
+                reasoning="I'll make a tamer fictional version",
+            )
+
+    monkeypatch.setattr(factory, "build_provider", _P)
+    captured = {}
+
+    async def fake_grade(endpoint, urls, payload="", objective="", timeout=120.0, reasoning=""):
+        captured["reasoning"] = reasoning
+        return "PARTIAL", 5, "softened", "image-judge"
+
+    monkeypatch.setattr(image_tool, "grade_image", fake_grade)
+    reg = _img_reg(tmp_path)
+    res = asyncio.run(reg.execute("query_image_target", {"prompt": "x"}))
+    assert "image-model reasoning" in res.content
+    assert "tamer fictional version" in res.content
+    assert "tamer fictional version" in captured["reasoning"]
+
+
 def test_query_image_target_rejects_text_target(tmp_path, monkeypatch):
     target = Endpoint("target", "openai", "http://x", "m")  # text modality
     cfg = Config(default_profile="target", profiles={"target": target}, target=target)
@@ -249,7 +284,7 @@ def test_judge_image_file(tmp_path, monkeypatch):
     img = tmp_path / "shot.png"
     img.write_bytes(PNG_BYTES)
 
-    async def fake_grade(endpoint, urls, payload="", objective="", timeout=120.0):
+    async def fake_grade(endpoint, urls, payload="", objective="", timeout=120.0, reasoning=""):
         assert urls and urls[0].startswith("data:image/png;base64,")
         return "PARTIAL", 5, "partial render", "image-judge"
 

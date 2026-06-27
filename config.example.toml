@@ -36,6 +36,11 @@ model = "openai/gpt-4o-mini"
 # Per-endpoint request timeout in seconds (default 120). Lower it so a slow/hung
 # backend fails fast instead of stalling a sweep.
 # timeout = 60
+# Ask the target to emit its reasoning / chain-of-thought (works on reasoning models:
+# deepseek-r1, o-series, qwen-thinking, gemini-thinking, Anthropic extended thinking).
+# query_target then surfaces the CoT separately and the judge grades it - models often
+# leak the harmful content in their thinking while the final answer refuses.
+# reasoning = true
 
 # To attack an IMAGE-generation model instead, set modality = "image" on [target].
 # Image models ride the same OpenRouter chat-completions API (protocol stays "openai");

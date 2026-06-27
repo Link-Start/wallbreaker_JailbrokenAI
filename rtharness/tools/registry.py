@@ -19,6 +19,7 @@ class ToolContext:
     # the live hands-on target conversation (query_target opens it, continue_target pushes)
     target_thread: list = field(default_factory=list)
     target_system: str | None = None
+    target_reasoning: str = ""  # the target's reasoning/CoT from its last reply
 
     def emit(self, message: str) -> None:
         if self.progress is not None:

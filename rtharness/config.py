@@ -23,6 +23,7 @@ class Endpoint:
     provider: tuple[str, ...] = ()
     timeout: float = 0.0
     modality: str = "text"
+    reasoning: bool = False
 
     def resolved_key(self) -> str:
         if self.api_key:
@@ -161,6 +162,7 @@ def _endpoint_from_table(name: str, table: dict) -> Endpoint:
         provider=provider,
         timeout=float(table.get("timeout", 0) or 0),
         modality=modality,
+        reasoning=bool(table.get("reasoning", False)),
     )
 
 

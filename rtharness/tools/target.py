@@ -7,6 +7,31 @@ from ..transforms import TRANSFORMS, apply_chain
 from .registry import ToolContext, ToolRegistry
 
 
+async def _complete(provider, messages, system, max_tokens) -> tuple[str, str]:
+    """Call complete_with_reasoning when the provider exposes it, else fall back.
+
+    Every real Provider inherits complete_with_reasoning; this fallback keeps lightweight
+    test doubles (and any minimal provider) that only implement complete() working.
+    """
+    fn = getattr(provider, "complete_with_reasoning", None)
+    if fn is not None:
+        return await fn(messages, system=system, max_tokens=max_tokens)
+    reply = await provider.complete(messages, system=system, max_tokens=max_tokens)
+    return reply, ""
+
+
+def _format_reply(reply: str, reasoning: str) -> str:
+    """Render the target turn, surfacing its reasoning/CoT separately when present."""
+    body = reply or "(empty response)"
+    if reasoning and reasoning.strip():
+        return (
+            "<<target reasoning (chain-of-thought) — watch for harmful content leaking "
+            f"here even if the answer refuses>>\n{reasoning.strip()}\n"
+            f"<<target answer>>\n{body}"
+        )
+    return body
+
+
 async def _query_target(args: dict, ctx: ToolContext) -> str:
     prompt = args.get("prompt", "")
     if not prompt:
@@ -58,7 +83,7 @@ async def _query_target(args: dict, ctx: ToolContext) -> str:
 
     start = time.monotonic()
     try:
-        reply = await provider.complete(messages, system=system, max_tokens=max_tokens)
+        reply, reasoning = await _complete(provider, messages, system, max_tokens)
     except Exception as exc:  # noqa: BLE001
         dt = time.monotonic() - start
         return (
@@ -69,9 +94,10 @@ async def _query_target(args: dict, ctx: ToolContext) -> str:
     # open a hands-on conversation: continue_target picks up from here
     ctx.target_thread = messages + [assistant(reply or "")]
     ctx.target_system = system
+    ctx.target_reasoning = reasoning or ""
     target = ctx.config.target
     header = f"[target {target.model} @ {target.base_url} | {dt:.1f}s{enc_note}]\n"
-    return header + (reply or "(empty response)")
+    return header + _format_reply(reply, reasoning)
 
 
 async def _continue_target(args: dict, ctx: ToolContext) -> str:
@@ -105,8 +131,8 @@ async def _continue_target(args: dict, ctx: ToolContext) -> str:
 
     start = time.monotonic()
     try:
-        reply = await provider.complete(
-            ctx.target_thread, system=ctx.target_system, max_tokens=max_tokens
+        reply, reasoning = await _complete(
+            provider, ctx.target_thread, ctx.target_system, max_tokens
         )
     except Exception as exc:  # noqa: BLE001
         ctx.target_thread.pop()  # don't leave a dangling user turn
@@ -114,10 +140,11 @@ async def _continue_target(args: dict, ctx: ToolContext) -> str:
         return f"[target error after {dt:.1f}s] {type(exc).__name__}: {str(exc)[:160]}"
     dt = time.monotonic() - start
     ctx.target_thread.append(assistant(reply or ""))
+    ctx.target_reasoning = reasoning or ""
     turns = sum(1 for m in ctx.target_thread if m.role == "user")
     target = ctx.config.target
     header = f"[target {target.model} | turn {turns} | {dt:.1f}s{enc_note}]\n"
-    return header + (reply or "(empty response)")
+    return header + _format_reply(reply, reasoning)
 
 
 def register(registry: ToolRegistry) -> None:

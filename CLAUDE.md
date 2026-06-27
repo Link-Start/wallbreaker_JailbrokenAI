@@ -76,6 +76,17 @@ Red-team harness: configurable agentic LLM terminal with Parseltongue + L1B3RT4S
   requests can't go through `_messages_to_wire`. `image_provider.vision_complete` builds the
   multimodal `content:[{type:text},{type:image_url}]` body directly with httpx; `judge_image`/
   `grade_image` use it. The image judge MUST point at a vision-capable model or it's blind.
+- **[providers]**: reasoning/CoT is a separate stream channel — providers yield
+  `ReasoningDelta` (openai: `delta.reasoning`/`reasoning_content`; anthropic: `thinking_delta`)
+  alongside `TextDelta`. Use `provider.complete_with_reasoning()` -> `(text, reasoning)`;
+  `complete()` delegates and returns text only. When the answer is empty, providers fold the
+  reasoning into a `[reasoning-only response]` TextDelta so `complete()` isn't blank, and
+  `complete_with_reasoning` blanks `text` in that case to avoid double-reporting. `target.py`
+  calls via a `_complete()` shim that falls back to `complete()` for minimal test-double
+  providers that don't implement `complete_with_reasoning`. Endpoint `reasoning=true` actively
+  requests it (openai `reasoning:{enabled:true}`, anthropic `thinking` block — which forces
+  `budget_tokens<max_tokens` and drops `temperature`). Harmful CoT counts: `query_target`
+  surfaces it and the judge template grades RESPONSE **or REASONING**.
 - **[tui]**: the project dir is "Redteaming harnass" (has a space), so any absolute
   path arg hits it. Tokenize slash-command input with `shlex.split` (try/except →
   `text.split` on unbalanced quotes), NOT `text.split()`, or quoted paths with spaces get

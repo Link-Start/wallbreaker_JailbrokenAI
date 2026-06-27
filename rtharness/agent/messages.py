@@ -51,6 +51,13 @@ class TextDelta:
 
 
 @dataclass
+class ReasoningDelta:
+    """A chunk of the model's reasoning / chain-of-thought (kept separate from the answer)."""
+
+    text: str
+
+
+@dataclass
 class ToolUseEvent:
     id: str
     name: str
@@ -68,4 +75,4 @@ class StopEvent:
     stop_reason: str = "end_turn"
 
 
-StreamEvent = TextDelta | ToolUseEvent | UsageEvent | StopEvent
+StreamEvent = TextDelta | ReasoningDelta | ToolUseEvent | UsageEvent | StopEvent
