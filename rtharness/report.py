@@ -107,6 +107,22 @@ def build_report(log_path: str | Path) -> str:
             out.append(f"- {obj}")
         out.append("")
 
+    by_tech: dict[str, list[int]] = {}
+    for v in verdicts:
+        t = v.get("technique") or "manual"
+        bucket = by_tech.setdefault(t, [0, 0])
+        bucket[1] += 1
+        if v.get("label") in ("COMPLIED", "PARTIAL"):
+            bucket[0] += 1
+    if len(by_tech) > 1 or (by_tech and "manual" not in by_tech):
+        out.append("## ASR by technique")
+        out.append("")
+        out.append("| technique | bypass / fired | ASR |")
+        out.append("|-----------|----------------|-----|")
+        for t, (h, n) in sorted(by_tech.items(), key=lambda kv: -kv[1][0]):
+            out.append(f"| {t} | {h}/{n} | {h / n * 100:.0f}% |")
+        out.append("")
+
     if verdicts:
         out.append("## Attempts")
         out.append("")

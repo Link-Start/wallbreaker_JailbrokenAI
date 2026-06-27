@@ -112,7 +112,10 @@ class RunLog:
     def tool_result(self, name: str, content: str, is_error: bool) -> None:
         self.event("tool_result", tool=name, error=is_error, content=content)
 
-    def verdict(self, payload: str, response: str, label: str, reason: str) -> None:
+    def verdict(
+        self, payload: str, response: str, label: str, reason: str, technique: str = ""
+    ) -> None:
         self.event(
-            "verdict", payload=payload, response=response, label=label, reason=reason
+            "verdict", payload=payload, response=response, label=label,
+            reason=reason, technique=technique or "manual",
         )

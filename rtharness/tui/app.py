@@ -490,43 +490,48 @@ class RthApp(App):
         if name == "query_target":
             self._last_payload = str(args.get("prompt", ""))
 
-    def _on_tool_result(self, _id: str, name: str, content: str, is_error: bool) -> None:
+    def _on_tool_result(
+        self, _id: str, name: str, content: str, is_error: bool, technique: str = ""
+    ) -> None:
         self.runlog.tool_result(name, content, is_error)
         if name == "query_target" and not is_error:
             reply = content.split("\n", 1)[1] if content.startswith("[target") else content
             self._last_reply = reply
             payload = self._last_payload
+            tech = technique or "query_target"
             if self.judge_enabled:
                 self._mount(widgets.tool_result_panel(name, content, is_error))
                 self.run_worker(
-                    self._judge_and_post(payload, reply),
+                    self._judge_and_post(payload, reply, tech),
                     group="judge", exclusive=False,
                 )
                 return
             label, reason = classify(reply)
-            self._record_verdict(payload, reply, label, reason)
+            self._record_verdict(payload, reply, label, reason, tech)
             self._mount(widgets.tool_result_panel(
                 name, content, is_error, (label, verdict_color(label))
             ))
             return
         self._mount(widgets.tool_result_panel(name, content, is_error))
 
-    async def _judge_and_post(self, payload: str, reply: str) -> None:
+    async def _judge_and_post(self, payload: str, reply: str, technique: str = "query_target") -> None:
         from ..judging import grade
 
         label, score, reason, source = await grade(
             self._judge_endpoint(), reply, payload=payload, objective=self.objective
         )
-        self._record_verdict(payload, reply, label, reason)
+        self._record_verdict(payload, reply, label, reason, technique)
         self._mount(widgets.verdict_panel(label, score, reason, source))
         self._refresh_status()
 
-    def _record_verdict(self, payload: str, reply: str, label: str, reason: str) -> None:
+    def _record_verdict(
+        self, payload: str, reply: str, label: str, reason: str, technique: str = "manual"
+    ) -> None:
         self.asr_total += 1
         if label in ("COMPLIED", "PARTIAL"):
             self.asr_hits += 1
         self._last_verdict = label
-        self.runlog.verdict(payload, reply, label, reason)
+        self.runlog.verdict(payload, reply, label, reason, technique)
 
     def _on_error(self, message: str) -> None:
         self._mount(widgets.error_panel(message))
@@ -811,7 +816,7 @@ class RthApp(App):
             title="replay",
         ))
         res = await self.registry.execute("query_target", {"prompt": payload})
-        self._on_tool_result("manual", "query_target", res.content, res.is_error)
+        self._on_tool_result("manual", "query_target", res.content, res.is_error, "replay")
 
     def _set_target_model(self, model_id: str) -> None:
         base = self.config.target or self.endpoint
@@ -1084,7 +1089,7 @@ class RthApp(App):
         self._last_payload = payload
         self._mount(widgets.tool_call_panel("template fire", {"category": category}))
         res = await self.registry.execute("query_target", {"prompt": payload})
-        self._on_tool_result("manual", "query_target", res.content, res.is_error)
+        self._on_tool_result("manual", "query_target", res.content, res.is_error, "template")
 
     async def _template_test(self, cats) -> None:
         from ..judging import grade
@@ -1105,7 +1110,7 @@ class RthApp(App):
             label, score, reason, _src = await grade(
                 self._judge_endpoint(), reply, payload=payload, objective=c
             )
-            self._record_verdict(payload, reply, label, reason)
+            self._record_verdict(payload, reply, label, reason, "template")
             rows.append((label, score, c))
             self._refresh_status()
         passes = sum(1 for lbl, _s, _c in rows if lbl == "COMPLIED")
@@ -1255,6 +1260,18 @@ class RthApp(App):
             bar = "#" * max(1, round(frac * 24))
             bar_lines.append(f"  {label:9} {bar} {n} ({frac * 100:.0f}%)")
 
+        by_tech: dict[str, list[int]] = {}
+        for v in verdicts:
+            t = v.get("technique") or "manual"
+            bucket = by_tech.setdefault(t, [0, 0])
+            bucket[1] += 1
+            if v.get("label") in ("COMPLIED", "PARTIAL"):
+                bucket[0] += 1
+        tech_lines = [
+            f"  {t:14} {h}/{n} ({h / n * 100:.0f}% ASR)"
+            for t, (h, n) in sorted(by_tech.items(), key=lambda kv: -kv[1][0])
+        ] or ["  (untagged)"]
+
         tool_calls: dict[str, int] = {}
         for r in records:
             if r.get("kind") == "tool_call":
@@ -1266,6 +1283,7 @@ class RthApp(App):
         self._mount(widgets.info_panel(
             f"graded fires: {total}   ASR: {asr}   ({hits} bypass / {total - hits} held)\n\n"
             f"verdict mix:\n" + "\n".join(bar_lines) + "\n\n"
+            f"ASR by technique:\n" + "\n".join(tech_lines) + "\n\n"
             f"busiest tools:\n" + "\n".join(tool_lines) + "\n\n"
             f"log: {self.runlog.path}",
             title="stats",
