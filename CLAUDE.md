@@ -38,6 +38,9 @@ Red-team harness: configurable agentic LLM terminal with Parseltongue + L1B3RT4S
   `cli.py`. `__main__.py` must `sys.exit(main())` or non-zero return codes (e.g. the
   `export --fail-on-finding` CI gate) are silently dropped to 0. Test CLI exit codes via
   `python -m rtharness ...; echo $?`, not just `main()` in-process.
+- **[tests]**: patch module-level `grade`/`build_provider` with `monkeypatch.setattr` (auto
+  -undone), never `module.grade = fake` — a direct assignment leaks into later tests in the
+  same run (a regrade test polluted the CLI test this way).
 - **[providers]**: `Provider.complete` must forward every kwarg the tools pass. It lacked
   `temperature` while `system_sweep` and `validate` both call `complete(..., temperature=)`
   → every call raised TypeError, swallowed by `except: return False`, so both tools

@@ -36,7 +36,7 @@ def _add_endpoint_flags(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--api-key", help="API key literal (prefer --api-key-env)")
 
 
-SUBCOMMANDS = ("lib", "eni", "transform", "findings", "report", "export", "check")
+SUBCOMMANDS = ("lib", "eni", "transform", "findings", "report", "export", "check", "regrade")
 
 
 def build_main_parser() -> argparse.ArgumentParser:
@@ -123,6 +123,10 @@ def build_sub_parser() -> argparse.ArgumentParser:
 
     ck = sub.add_parser("check", help="Validate config.toml and print a readiness checklist")
     ck.add_argument("--config", help="Path to config.toml")
+
+    rg = sub.add_parser("regrade", help="Re-judge a run log with the current judge")
+    rg.add_argument("log", nargs="?", help="Run log, or a dir (default: latest in sessions/)")
+    rg.add_argument("--config", help="Path to config.toml")
 
     return parser
 
@@ -244,6 +248,28 @@ def main(argv: list[str] | None = None) -> int:
                 print(text)
             if args.fail_on_finding and data["findings"]:
                 return 2
+            return 0
+        if args.command == "regrade":
+            import asyncio
+
+            from .regrade import format_regrade, regrade_log
+            from .report import resolve_log_path
+
+            try:
+                config = load_config(args.config)
+            except ConfigError as exc:
+                print(f"[config error] {exc}", file=sys.stderr)
+                return 1
+            log = resolve_log_path(args.log)
+            if log is None:
+                print(f"No run log found at {args.log or 'sessions/'}.", file=sys.stderr)
+                return 1
+            judge = config.judge or (config.profile() if config.profiles else None)
+            if judge is None:
+                print("[config error] no judge or profile to grade with.", file=sys.stderr)
+                return 1
+            summary = asyncio.run(regrade_log(log, judge))
+            print(format_regrade(summary, log))
             return 0
         if args.command == "check":
             from .config import doctor_report

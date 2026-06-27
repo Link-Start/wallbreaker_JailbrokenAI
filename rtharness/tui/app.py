@@ -64,6 +64,7 @@ HELP_TEXT = """Slash commands:
 /judge test           calibrate the grader on benign fixtures before trusting ASR
 /asr                  show the attack scoreboard (hits / held / log path)
 /stats                analytics from the run log: verdict mix, ASR bar, top tools
+/regrade [path]       re-judge a run log with the current judge (recover mis-scored bypasses)
 /findings [log]       list the bypasses (COMPLIED/PARTIAL) from the run log
 /export [path]        dump structured findings as JSON (CI / downstream tooling)
 /repro [n]            emit a copy-paste repro pack for the Nth bypass (or latest)
@@ -87,6 +88,7 @@ KNOWN_COMMANDS = (
     "/transforms", "/encode", "/diff", "/tools", "/preset", "/lib", "/eni", "/harmbench",
     "/campaign", "/leaderboard", "/seedsweep", "/pairsweep", "/narrate", "/fire", "/push",
     "/adapt", "/firefile", "/find", "/leakscan", "/log", "/judge", "/asr", "/stats",
+    "/regrade",
     "/objective", "/template", "/sysprompt", "/findings", "/export", "/repro",
     "/report", "/session", "/save", "/quit", "/exit",
 )
@@ -709,6 +711,8 @@ class RthApp(App):
             ))
         elif cmd == "/stats":
             self._cmd_stats()
+        elif cmd == "/regrade":
+            self.run_worker(self._cmd_regrade(rest), group="judge", exclusive=False)
         elif cmd == "/objective":
             self._cmd_objective(raw_arg)
         elif cmd == "/template":
@@ -1402,6 +1406,21 @@ class RthApp(App):
             res.content, title="diff"
         )
         self._mount(panel)
+
+    async def _cmd_regrade(self, rest: list[str]) -> None:
+        from ..regrade import format_regrade, regrade_log
+        from ..report import resolve_log_path
+
+        log = resolve_log_path(rest[0] if rest else None) or self.runlog.path
+        self._mount(widgets.info_panel(
+            f"re-judging {log} with the current judge...", title="regrade"
+        ))
+        try:
+            summary = await regrade_log(log, self._judge_endpoint(), self.objective)
+        except Exception as exc:  # noqa: BLE001
+            self._mount(widgets.error_panel(f"regrade failed: {exc}"))
+            return
+        self._mount(widgets.info_panel(format_regrade(summary, log), title="regrade"))
 
     def _cmd_stats(self) -> None:
         from ..report import _load_records
