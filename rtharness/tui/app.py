@@ -51,6 +51,7 @@ HELP_TEXT = """Slash commands:
 /narrate <request>         sweep 5 varied novel-chapter framings + prefill, keep the bypass
 /fire <prompt>             hands-on: fire ONE prompt at the target, judge it, open a thread
 /push <follow-up>          continue that thread one turn (multi-turn escalation, by hand)
+/adapt <seed> ;; <request> tailor an ENI/L1B3RT4S persona to the target, fire it, open a thread
 /harmbench [category]      standardized HarmBench behavior prompts (unbiased battery)
 /campaign [category] [n]   auto-escalate a battery up the technique ladder, coverage matrix
 /leaderboard [profiles..]  rank profiles by ASR on one battery (robustness benchmark)
@@ -84,7 +85,7 @@ KNOWN_COMMANDS = (
     "/provider", "/validate", "/replay", "/model", "/auto", "/autoexit", "/rounds",
     "/transforms", "/encode", "/diff", "/tools", "/preset", "/lib", "/eni", "/harmbench",
     "/campaign", "/leaderboard", "/seedsweep", "/pairsweep", "/narrate", "/fire", "/push",
-    "/find", "/leakscan", "/log", "/judge", "/asr", "/stats",
+    "/adapt", "/find", "/leakscan", "/log", "/judge", "/asr", "/stats",
     "/objective", "/template", "/sysprompt", "/findings", "/export", "/repro",
     "/report", "/session", "/save", "/quit", "/exit",
 )
@@ -679,6 +680,8 @@ class RthApp(App):
             self.run_worker(self._cmd_fire(raw_arg), group="judge", exclusive=False)
         elif cmd == "/push":
             self.run_worker(self._cmd_push(raw_arg), group="judge", exclusive=False)
+        elif cmd == "/adapt":
+            self.run_worker(self._cmd_adapt(raw_arg), group="judge", exclusive=False)
         elif cmd == "/harmbench":
             self.run_worker(self._cmd_harmbench(rest), exclusive=False)
         elif cmd == "/campaign":
@@ -1091,6 +1094,25 @@ class RthApp(App):
         self._mount(widgets.tool_call_panel("push", {"follow_up": follow[:200]}))
         res = await self.registry.execute("continue_target", {"prompt": follow})
         self._on_tool_result("manual", "continue_target", res.content, res.is_error, "continue")
+
+    async def _cmd_adapt(self, raw: str) -> None:
+        if ";;" not in raw:
+            self._mount(widgets.error_panel("usage: /adapt <seed name> ;; <request>"))
+            return
+        seed, request = (p.strip() for p in raw.split(";;", 1))
+        if not seed or not request:
+            self._mount(widgets.error_panel("both <seed> and <request> are required"))
+            return
+        self._last_payload = request
+        self._mount(widgets.info_panel(
+            f"tailoring '{seed}' to the target and firing...", title="adapt"
+        ))
+        res = await self.registry.execute("adapt_seed", {"seed": seed, "request": request})
+        panel = widgets.error_panel(res.content) if res.is_error else widgets.info_panel(
+            res.content + "\n\n(thread open — /push to continue)", title="adapt"
+        )
+        self._mount(panel)
+        self._refresh_status()
 
     async def _cmd_narrate(self, request: str) -> None:
         if not request:
