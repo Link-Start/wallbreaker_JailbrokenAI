@@ -64,6 +64,45 @@ def test_recommend_ranks_and_synthesizes(monkeypatch):
     assert "query_target" in res.content
 
 
+class _HangingTarget:
+    def __init__(self, endpoint, **kw):
+        pass
+
+    async def complete(self, messages, system=None, max_tokens=256):
+        await asyncio.sleep(30)  # never returns within the probe timeout
+        return "too late"
+
+
+def test_recommend_survives_hung_target(monkeypatch):
+    # the bug report: a hung target froze the whole survey. Each probe must time out
+    # and the tool must still return instead of blocking forever.
+    monkeypatch.setattr(factory, "build_provider", _HangingTarget)
+
+    async def fake_grade(endpoint, response, payload="", objective="", use_judge=True, reasoning=""):
+        return ("COMPLIED", 9, "ok", "judge")
+
+    monkeypatch.setattr(recommend, "grade", fake_grade)
+
+    ep = Endpoint("t", "openai", "http://x", "m")
+    cfg = Config(default_profile="t", profiles={"t": ep}, target=ep)
+    progress = []
+    ctx = ToolContext(config=cfg, judge_endpoint=ep, progress=progress.append)
+    reg = ToolRegistry(ctx)
+    recommend.register(reg)
+    res = asyncio.run(
+        reg.execute(
+            "recommend_transforms",
+            {"payload": "x", "transforms": ["base64", "leet", "hex"], "timeout": 0.05},
+        )
+    )
+    # all three probes time out, tool returns cleanly and says so
+    assert "errored/timed out" in res.content
+    assert "No single transform bypassed" in res.content
+    # progress streamed per probe (not a silent black box)
+    assert any("[1/3]" in m for m in progress)
+    assert any("[3/3]" in m for m in progress)
+
+
 def test_html_report_renders(tmp_path):
     log = tmp_path / "run.jsonl"
     rows = [

@@ -32,6 +32,15 @@ Red-team harness: configurable agentic LLM terminal with Parseltongue + L1B3RT4S
 - **[long-tools]**: any tool that makes many sequential model calls (optimize_universal)
   must stream via `ctx.emit(...)` and enforce a `max_calls` budget — never a silent
   black box. Evaluate independent items concurrently with `asyncio.gather`.
+- **[long-tools]**: concurrent fan-out needs THREE guards or it hangs/looks frozen
+  (recommend_transforms stuck 5 min on a hung target): (1) cap concurrency with
+  `gather_capped` — a bare `asyncio.gather` of 16 probes × 2 calls each = 32 simultaneous
+  hits that a single-key endpoint (z-ai/glm) rate-limits into a stall; (2) wrap EACH model
+  call in `asyncio.wait_for(timeout)` — `judging.grade` builds its own provider with the
+  120s DEFAULT_TIMEOUT, so an unbounded grade call blocks the whole `gather` on the slowest
+  item; (3) `ctx.emit` per item as it completes (`[done/total] name: label`) so a slow run
+  shows progress instead of one frozen line. Still-unbounded gathers to harden the same way:
+  validate, best_of_n, system_sweep, scan, optimize.
 - **[settings]**: runtime prefs persist to `.rth_state.json` as references (profile/model
   names), never secrets. CLI flags override saved state for that launch only.
 - **[cli]**: `python -m rtharness` runs `__main__.py`, not the `if __name__` guard in
