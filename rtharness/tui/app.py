@@ -80,7 +80,11 @@ Ctrl+S report · Ctrl+Y copy payload · Ctrl+T stats · Ctrl+R repro · Ctrl+L c
 
 Up / Down arrows recall your previous inputs into the prompt.
 Type anything else to talk to the agent. It has shell, file, parseltongue,
-l1b3rt4s, query_target, and http_request tools."""
+l1b3rt4s, query_target, and http_request tools.
+
+LIVE STEERING: in autonomous mode you can type feedback WHILE the agent is working —
+it queues and gets injected into the loop at the next round, so the agent adapts
+mid-engagement (e.g. "try the GLM ENI seed", "drop the encoding, go fiction-frame")."""
 
 
 KNOWN_COMMANDS = (
@@ -150,6 +154,7 @@ class RthApp(App):
         self._last_payload = ""
         self._last_reply = ""
         self._last_verdict = ""
+        self._pending_feedback: list[str] = []
         self.exit_on_finish = bool(prefs.get("exit_on_finish", True))
         self.judge_enabled = bool(prefs.get("judge", True))
         self.judge_model_override = prefs.get("judge_model")
@@ -296,9 +301,26 @@ class RthApp(App):
             self._handle_command(text)
             return
         if self._busy:
-            self._mount(widgets.error_panel("Agent is still working; wait for it."))
+            if self.auto:
+                self._pending_feedback.append(text)
+                self._record_input(text)
+                self._mount(widgets.info_panel(
+                    f"steering queued — the agent adapts next round:\n{text}", title="feedback"
+                ))
+            else:
+                self._mount(widgets.error_panel("Agent is still working; wait for it."))
             return
         self._submit_user(text)
+
+    def _drain_feedback(self) -> list[str]:
+        fb = self._pending_feedback
+        self._pending_feedback = []
+        return fb
+
+    def _on_feedback(self, msg: str) -> None:
+        self._mount(widgets.info_panel(
+            f"injected into the loop — agent is adapting:\n{msg}", title="feedback"
+        ))
 
     def _submit_user(self, text: str) -> None:
         self._mount(widgets.user_panel(text))
@@ -423,6 +445,7 @@ class RthApp(App):
             on_error=self._on_error,
             on_round=self._on_round,
             on_usage=self._on_usage,
+            on_feedback=self._on_feedback,
         )
         try:
             if self.auto:
@@ -434,6 +457,7 @@ class RthApp(App):
                     events=events,
                     max_rounds=self.max_rounds,
                     max_tokens=self.max_tokens,
+                    feedback=self._drain_feedback,
                 )
                 self._handle_auto_result(result)
             else:

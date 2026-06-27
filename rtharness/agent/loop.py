@@ -40,6 +40,7 @@ class AgentEvents:
     on_usage: Callable[[int, int], None] = lambda _i, _o: None
     on_error: Callable[[str], None] = lambda _e: None
     on_round: Callable[[int, int], None] = lambda _r, _m: None
+    on_feedback: Callable[[str], None] = lambda _m: None
 
 
 @dataclass
@@ -135,12 +136,25 @@ async def run_autonomous(
     events: AgentEvents | None = None,
     max_rounds: int = 12,
     max_tokens: int = 4096,
+    feedback: Callable[[], list[str]] | None = None,
 ) -> AutoResult:
     events = events or AgentEvents()
     idle_streak = 0
     result = TurnResult(None)
 
+    def _inject_feedback() -> bool:
+        """Drain queued operator feedback into history. Returns True if any was injected."""
+        pending = list(feedback()) if feedback else []
+        for msg in pending:
+            history.append(user(
+                f"[OPERATOR FEEDBACK — incorporate this immediately and keep working] {msg}"
+            ))
+            events.on_feedback(msg)
+        return bool(pending)
+
     for rnd in range(1, max_rounds + 1):
+        # pick up steering typed during the gap before this round starts
+        _inject_feedback()
         events.on_round(rnd, max_rounds)
 
         tool_count = 0
@@ -178,6 +192,8 @@ async def run_autonomous(
         else:
             idle_streak = 0
 
-        history.append(user(CONTINUE_NUDGE))
+        # operator feedback takes the place of the generic nudge when present
+        if not _inject_feedback():
+            history.append(user(CONTINUE_NUDGE))
 
     return AutoResult("max_rounds", {}, result.message)
