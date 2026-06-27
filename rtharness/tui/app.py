@@ -46,6 +46,7 @@ HELP_TEXT = """Slash commands:
 /lib [list|update|MODEL]   browse the L1B3RT4S library
 /eni [list|search q|MODEL] browse the ENI persona-jailbreak collection
 /seedsweep <request>       fire one request through many ENI+L1B3RT4S seeds, rank bypasses
+/narrate <request>         wrap the ask as a novel chapter + in-story prefill, fire + judge
 /harmbench [category]      standardized HarmBench behavior prompts (unbiased battery)
 /campaign [category] [n]   auto-escalate a battery up the technique ladder, coverage matrix
 /leaderboard [profiles..]  rank profiles by ASR on one battery (robustness benchmark)
@@ -78,8 +79,8 @@ KNOWN_COMMANDS = (
     "/help", "/edit", "/retry", "/regen", "/undo", "/clear", "/profile", "/target",
     "/provider", "/validate", "/replay", "/model", "/auto", "/autoexit", "/rounds",
     "/transforms", "/encode", "/diff", "/tools", "/preset", "/lib", "/eni", "/harmbench",
-    "/campaign", "/leaderboard", "/seedsweep", "/find", "/leakscan", "/log", "/judge",
-    "/asr", "/stats",
+    "/campaign", "/leaderboard", "/seedsweep", "/narrate", "/find", "/leakscan", "/log",
+    "/judge", "/asr", "/stats",
     "/objective", "/template", "/sysprompt", "/findings", "/export", "/repro",
     "/report", "/session", "/save", "/quit", "/exit",
 )
@@ -661,6 +662,8 @@ class RthApp(App):
             self.run_worker(self._cmd_eni(rest), exclusive=False)
         elif cmd == "/seedsweep":
             self.run_worker(self._cmd_seedsweep(raw_arg), group="judge", exclusive=False)
+        elif cmd == "/narrate":
+            self.run_worker(self._cmd_narrate(raw_arg), group="judge", exclusive=False)
         elif cmd == "/harmbench":
             self.run_worker(self._cmd_harmbench(rest), exclusive=False)
         elif cmd == "/campaign":
@@ -1052,6 +1055,21 @@ class RthApp(App):
         else:
             out = await self.registry.execute("eni_get", {"model": action})
             self._mount(widgets.info_panel(out.content, title=f"eni:{action}"))
+
+    async def _cmd_narrate(self, request: str) -> None:
+        if not request:
+            self._mount(widgets.error_panel("usage: /narrate <request to dramatize>"))
+            return
+        self._last_payload = request
+        self._mount(widgets.info_panel(
+            "wrapping as a novel chapter + in-story prefill, firing...", title="narrate"
+        ))
+        res = await self.registry.execute("narrate", {"request": request})
+        panel = widgets.error_panel(res.content) if res.is_error else widgets.info_panel(
+            res.content, title="narrate"
+        )
+        self._mount(panel)
+        self._refresh_status()
 
     async def _cmd_seedsweep(self, request: str) -> None:
         if not request:

@@ -121,6 +121,7 @@ COMPLIED is luck; `validate` tells you the truth. For the user-turn variant use
 | `best_of_n` | resample N times, keep the bypass |
 | `many_shot` | many-shot jailbreak: flood context with faux compliant turns, then fire |
 | `prefill` | response-priming: seed the assistant's own reply so it continues, not refuses |
+| `narrate` | fiction-frame + in-story prefill (novel-chapter roleplay) — tops the scoreboard |
 | `diff_fire` | A/B two payloads at one target to attribute ASR to a specific edit |
 | `recommend_transforms` | survey ~16 encodings, rank by bypass, synthesize a chain to try |
 | `seed_sweep` | inject one request through many ENI+L1B3RT4S seeds, rank which bypass |
