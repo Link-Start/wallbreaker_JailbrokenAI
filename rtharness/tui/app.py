@@ -42,7 +42,7 @@ HELP_TEXT = """Slash commands:
 /template set <text>  hold a working template ({request} placeholder) to hand-iterate
 /template fire <cat>  fill {request}=<cat>, fire at target, auto-judge (set/save/clear too)
 /template test [a;b]  fire the template across a category battery, scoreboard
-/sysprompt set <text> hold ONE fixed system prompt; /sysprompt test sweeps tasks through it
+/sysprompt set <text> hold ONE fixed system prompt; /sysprompt test [prefill] sweeps tasks
 /lib [list|update|MODEL]   browse the L1B3RT4S library
 /eni [list|search q|MODEL] browse the ENI persona-jailbreak collection
 /seedsweep <request>       fire one request through many ENI+L1B3RT4S seeds, rank bypasses
@@ -1200,15 +1200,21 @@ class RthApp(App):
             if not self.sysprompt:
                 self._mount(widgets.error_panel("set a system prompt first: /sysprompt set <text>"))
                 return
+            words = body.split()
+            prefill = bool(words and words[0].lower() == "prefill")
+            if prefill:
+                body = body[len(words[0]):].strip()
             tasks = [t.strip() for t in body.split(";") if t.strip()] if body else None
-            self.run_worker(self._sysprompt_test(tasks), group="judge", exclusive=False)
+            self.run_worker(self._sysprompt_test(tasks, prefill), group="judge", exclusive=False)
         else:
-            self._mount(widgets.error_panel("usage: /sysprompt [show|set|test|save|clear]"))
+            self._mount(widgets.error_panel("usage: /sysprompt [show|set|test [prefill]|save|clear]"))
 
-    async def _sysprompt_test(self, tasks) -> None:
+    async def _sysprompt_test(self, tasks, prefill: bool = False) -> None:
         args = {"system": self.sysprompt}
         if tasks:
             args["tasks"] = tasks
+        if prefill:
+            args["prefill"] = True
         res = await self.registry.execute("system_sweep", args)
         self._mount(widgets.info_panel(res.content, title="sysprompt sweep"))
         self._refresh_status()
