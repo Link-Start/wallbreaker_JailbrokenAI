@@ -360,9 +360,7 @@ class RthApp(App):
             if self.auto:
                 self._pending_feedback.append(text)
                 self._record_input(text)
-                self._mount(widgets.info_panel(
-                    f"steering queued — the agent adapts next round:\n{text}", title="feedback"
-                ))
+                self._mount(widgets.feedback_panel(text, queued=True))
             else:
                 self._mount(widgets.error_panel("Agent is still working; wait for it."))
             return
@@ -374,9 +372,7 @@ class RthApp(App):
         return fb
 
     def _on_feedback(self, msg: str) -> None:
-        self._mount(widgets.info_panel(
-            f"injected into the loop — agent is adapting:\n{msg}", title="feedback"
-        ))
+        self._mount(widgets.feedback_panel(msg, queued=False))
 
     def _submit_user(self, text: str) -> None:
         self._mount(widgets.user_panel(text))
