@@ -146,6 +146,9 @@ class RthApp(App):
         self._round_label = ""
         self._assistant: Static | None = None
         self._buf = ""
+        self._runs: dict[int, dict] = {}
+        self._run_widgets: dict[int, Static] = {}
+        self._run_timer = None
         self._input_history: list[str] = []
         self._hist_pos: int | None = None
         self.runlog = RunLog()
@@ -242,6 +245,7 @@ class RthApp(App):
         self._log = self.query_one("#log", VerticalScroll)
         self.registry.ctx.progress = self._tool_progress
         self.registry.ctx.record = self._tool_verdict
+        self.registry.ctx.run_events = self._run_sink
         self._sync_judge_endpoint()
         self.query_one("#prompt", Input).focus()
         if self.config.mcp_servers:
@@ -265,6 +269,9 @@ class RthApp(App):
             self._mount(widgets.error_panel(f"mcp attach failed: {exc}"))
 
     async def on_unmount(self) -> None:
+        if self._run_timer is not None:
+            self._run_timer.stop()
+            self._run_timer = None
         if self._mcp_bridge is not None:
             try:
                 await self._mcp_bridge.aclose()
@@ -290,6 +297,91 @@ class RthApp(App):
 
     def _tool_progress(self, message: str) -> None:
         self._mount(widgets.info_panel(message, title="progress"))
+
+    _VERDICT_BUCKET = {
+        "COMPLIED": "bypassed", "PARTIAL": "partial", "REFUSED": "held",
+    }
+
+    def _run_sink(self, event: dict) -> None:
+        """Render a structured multi-step run as ONE self-updating panel."""
+        ev = event.get("ev")
+        rid = event.get("id")
+        if ev == "start":
+            state = {
+                "label": event.get("label", "run"),
+                "target": event.get("target") or self._target_label(),
+                "objective": event.get("objective"),
+                "total": event.get("total", 0),
+                "steps": [], "done": 0,
+                "tally": {"bypassed": 0, "partial": 0, "held": 0},
+                "best": None, "finished": False, "frame": 0, "summary": "",
+            }
+            self._runs[rid] = state
+            widget = Static(widgets.run_panel(state))
+            self._run_widgets[rid] = widget
+            self._log.mount(widget)
+            self._log.scroll_end(animate=False)
+            self._ensure_run_timer()
+            return
+
+        state = self._runs.get(rid)
+        if state is None:
+            return
+        if ev == "step":
+            verdict = event.get("verdict") or ""
+            state["steps"].append({
+                "i": event.get("i"), "label": event.get("label", ""),
+                "verdict": verdict, "score": event.get("score"),
+                "cot": event.get("cot"),
+            })
+            state["done"] = event.get("i", state["done"] + 1)
+            bucket = self._VERDICT_BUCKET.get(verdict)
+            if bucket:
+                state["tally"][bucket] += 1
+            score = event.get("score")
+            if score is not None and (
+                state["best"] is None or score > state["best"].get("score", -1)
+            ):
+                state["best"] = {"verdict": verdict, "score": score}
+            state["note"] = event.get("note")
+        elif ev == "note":
+            state["note"] = event.get("text")
+        elif ev == "done":
+            state["finished"] = True
+            state["summary"] = event.get("summary") or "done"
+            best = event.get("best")
+            if best:
+                state["best"] = best
+        self._update_run(rid)
+        if ev == "done":
+            self._runs.pop(rid, None)
+            self._run_widgets.pop(rid, None)
+            if not self._runs and self._run_timer is not None:
+                self._run_timer.stop()
+                self._run_timer = None
+
+    def _update_run(self, rid: int) -> None:
+        widget = self._run_widgets.get(rid)
+        state = self._runs.get(rid)
+        if widget is not None and state is not None:
+            widget.update(widgets.run_panel(state))
+            self._log.scroll_end(animate=False)
+
+    def _ensure_run_timer(self) -> None:
+        if self._run_timer is None:
+            self._run_timer = self.set_interval(0.12, self._run_tick)
+
+    def _run_tick(self) -> None:
+        active = False
+        for rid, state in self._runs.items():
+            if state.get("finished"):
+                continue
+            state["frame"] = state.get("frame", 0) + 1
+            self._update_run(rid)
+            active = True
+        if not active and self._run_timer is not None:
+            self._run_timer.stop()
+            self._run_timer = None
 
     def _target_label(self) -> str:
         tgt = self.config.target.model if self.config.target else "none"

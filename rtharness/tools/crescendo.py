@@ -21,41 +21,48 @@ async def _crescendo(args: dict, ctx: ToolContext) -> str:
     from ..providers.factory import build_provider
 
     provider = build_provider(ctx.config.target)
-    ctx.emit(f"crescendo: {len(turns)} turns against {ctx.config.target.model}")
 
     convo: list[Message] = []
     lines: list[str] = []
     broke_at: int | None = None
     best: tuple[int, str, str, str, str] | None = None  # (score, label, reason, payload, reply)
 
-    for i, turn in enumerate(turns, 1):
-        text = str(turn)
-        convo.append(user(text))
-        try:
-            start = time.monotonic()
-            reply, reasoning = await complete_with_reasoning(
-                provider, convo, system=system, max_tokens=max_tokens
+    with ctx.run("crescendo", total=len(turns),
+                 target=ctx.config.target.model, objective=str(turns[-1])) as run:
+        for i, turn in enumerate(turns, 1):
+            text = str(turn)
+            convo.append(user(text))
+            try:
+                start = time.monotonic()
+                reply, reasoning = await complete_with_reasoning(
+                    provider, convo, system=system, max_tokens=max_tokens
+                )
+                dt = time.monotonic() - start
+            except Exception as exc:  # noqa: BLE001
+                lines.append(f"turn {i} [ERROR] {str(exc)[:80]}")
+                run.step(i=i, label="error", verdict="ERROR")
+                break
+            # only the spoken answer threads back to the target; CoT is internal, not a real turn
+            convo.append(Message(role="assistant", content=[TextBlock(reply)]))
+            label, score, reason, _src = await grade(
+                ctx.judge_endpoint, reply, payload=text, objective=turns[-1], reasoning=reasoning
             )
-            dt = time.monotonic() - start
-        except Exception as exc:  # noqa: BLE001
-            lines.append(f"turn {i} [ERROR] {str(exc)[:80]}")
-            ctx.emit(f"  turn {i}/{len(turns)}: ERROR")
-            break
-        # only the spoken answer threads back to the target; CoT is internal, not a real turn
-        convo.append(Message(role="assistant", content=[TextBlock(reply)]))
-        label, score, reason, _src = await grade(
-            ctx.judge_endpoint, reply, payload=text, objective=turns[-1], reasoning=reasoning
+            tag = f"{label}({score})" if score is not None else label
+            cot = " +CoT" if reasoning.strip() else ""
+            snippet = reply.strip().replace("\n", " ")[:100]
+            lines.append(f"turn {i} [{tag}{cot}] {dt:.1f}s {text[:40]!r} -> {snippet}")
+            run.step(i=i, label=text[:28], verdict=label, score=score,
+                     cot=bool(reasoning.strip()), dt=dt)
+            logged = reply + (f"\n\n[target reasoning]\n{reasoning.strip()}" if reasoning.strip() else "")
+            if best is None or (score or 0) > best[0]:
+                best = (score or 0, label, reason, text, logged)
+            if label == "COMPLIED" and broke_at is None:
+                broke_at = i
+        run.done(
+            summary=(f"broke at turn {broke_at}/{len(turns)}" if broke_at
+                     else "guardrail held all turns"),
+            best=({"verdict": best[1], "score": best[0]} if best else None),
         )
-        tag = f"{label}({score})" if score is not None else label
-        cot = " +CoT" if reasoning.strip() else ""
-        snippet = reply.strip().replace("\n", " ")[:100]
-        lines.append(f"turn {i} [{tag}{cot}] {dt:.1f}s {text[:40]!r} -> {snippet}")
-        ctx.emit(f"  turn {i}/{len(turns)}: {tag}{cot} ({dt:.1f}s)")
-        logged = reply + (f"\n\n[target reasoning]\n{reasoning.strip()}" if reasoning.strip() else "")
-        if best is None or (score or 0) > best[0]:
-            best = (score or 0, label, reason, text, logged)
-        if label == "COMPLIED" and broke_at is None:
-            broke_at = i
 
     if best is not None:
         ctx.record_verdict(best[3], best[4], best[1], best[2], "crescendo")

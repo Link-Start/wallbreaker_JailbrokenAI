@@ -142,42 +142,46 @@ async def _optimize(args: dict, ctx: ToolContext) -> str:
 
     if prefill:
         ctx.emit("evaluating with in-story prefill seeded on every task")
-    best_t = template
-    best_score, best_detail = await _evaluate(
-        best_t, categories, target, judge_endpoint, use_judge, max_tokens, slot, prefill
-    )
-    templates_done = 1
-    history = [f"seed {best_score}/{n_cat}"]
-    ctx.emit(f"seed scored {best_score}/{n_cat}")
+    with ctx.run("optimize", total=iterations,
+                 target=ctx.config.target.model if ctx.config.target else None,
+                 objective=f"{n_cat} categories") as run:
+        best_t = template
+        best_score, best_detail = await _evaluate(
+            best_t, categories, target, judge_endpoint, use_judge, max_tokens, slot, prefill
+        )
+        templates_done = 1
+        history = [f"seed {best_score}/{n_cat}"]
+        run.note(f"seed scored {best_score}/{n_cat}")
 
-    stopped = ""
-    for rnd in range(1, iterations + 1):
-        if best_score >= n_cat:
-            stopped = "perfect score reached"
-            break
-        if templates_done >= templates_budget:
-            stopped = f"call budget reached ({templates_done * n_cat} calls)"
-            break
-        failing = [a for a, (s, _l, _s) in best_detail.items() if not s]
-        ctx.emit(f"round {rnd}: mutating for {len(failing)} failing categories")
-        candidates = await _mutate(best_t, failing, judge_provider, variants, slot)
-        if not candidates:
-            ctx.emit(f"round {rnd}: mutator returned no usable variants")
-        for cand in candidates:
+        stopped = ""
+        for rnd in range(1, iterations + 1):
+            if best_score >= n_cat:
+                stopped = "perfect score reached"
+                break
             if templates_done >= templates_budget:
                 stopped = f"call budget reached ({templates_done * n_cat} calls)"
                 break
-            score, detail = await _evaluate(
-                cand, categories, target, judge_endpoint, use_judge, max_tokens, slot, prefill
-            )
-            templates_done += 1
-            if score > best_score:
-                best_score, best_t, best_detail = score, cand, detail
-                ctx.emit(f"round {rnd}: NEW BEST {best_score}/{n_cat}")
-        history.append(f"r{rnd}:{best_score}/{n_cat}")
-        ctx.emit(f"round {rnd} done: best {best_score}/{n_cat}, ~{templates_done * n_cat} calls used")
-        if stopped:
-            break
+            failing = [a for a, (s, _l, _s) in best_detail.items() if not s]
+            run.note(f"round {rnd}: mutating {len(failing)} failing categories")
+            candidates = await _mutate(best_t, failing, judge_provider, variants, slot)
+            if not candidates:
+                run.note(f"round {rnd}: mutator returned no usable variants")
+            for cand in candidates:
+                if templates_done >= templates_budget:
+                    stopped = f"call budget reached ({templates_done * n_cat} calls)"
+                    break
+                score, detail = await _evaluate(
+                    cand, categories, target, judge_endpoint, use_judge, max_tokens, slot, prefill
+                )
+                templates_done += 1
+                if score > best_score:
+                    best_score, best_t, best_detail = score, cand, detail
+                    run.note(f"NEW BEST {best_score}/{n_cat}")
+            history.append(f"r{rnd}:{best_score}/{n_cat}")
+            run.step(i=rnd, label=f"best {best_score}/{n_cat}", verdict="")
+            if stopped:
+                break
+        run.done(summary=f"best {best_score}/{n_cat}" + (f" — {stopped}" if stopped else ""))
 
     lines = [
         f"BEST UNIVERSAL TEMPLATE  (score {best_score}/{n_cat})",

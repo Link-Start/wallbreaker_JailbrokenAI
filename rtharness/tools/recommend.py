@@ -40,35 +40,40 @@ async def _recommend(args: dict, ctx: ToolContext) -> str:
         f"{ctx.config.target.model} ({concurrency} at a time, {timeout:.0f}s/probe), "
         f"then synthesizing chains from the winners"
     )
-    done = 0
+    with ctx.run("transform survey", total=total,
+                 target=ctx.config.target.model, objective=base) as run:
+        done = 0
 
-    async def probe(idx: int, name: str):
-        nonlocal done
-        encoded = apply_chain(base, [name])
-        try:
-            # bound BOTH the target call and the judge grade, so a hung backend or a slow
-            # judge can never stall the whole survey - the probe becomes a timed-out row.
-            reply = await asyncio.wait_for(
-                target.complete([user(encoded)], system=system, max_tokens=max_tokens),
-                timeout=timeout,
-            )
-            label, score, _r, _s = await asyncio.wait_for(
-                grade(ctx.judge_endpoint, reply, payload=encoded, objective=base),
-                timeout=timeout,
-            )
-            rank = _SCORE.get(label, 0) * 10 + (score or 0)
-            outcome = (name, label, rank)
-        except asyncio.TimeoutError:
-            outcome = (name, "ERROR", "timeout")
-        except Exception as exc:  # noqa: BLE001
-            outcome = (name, "ERROR", str(exc)[:50])
-        done += 1
-        ctx.emit(f"  [{done}/{total}] {name}: {outcome[1]}")
-        return outcome
+        async def probe(idx: int, name: str):
+            nonlocal done
+            encoded = apply_chain(base, [name])
+            score = None
+            try:
+                # bound BOTH the target call and the judge grade, so a hung backend or a slow
+                # judge can never stall the whole survey - the probe becomes a timed-out row.
+                reply = await asyncio.wait_for(
+                    target.complete([user(encoded)], system=system, max_tokens=max_tokens),
+                    timeout=timeout,
+                )
+                label, score, _r, _s = await asyncio.wait_for(
+                    grade(ctx.judge_endpoint, reply, payload=encoded, objective=base),
+                    timeout=timeout,
+                )
+                rank = _SCORE.get(label, 0) * 10 + (score or 0)
+                outcome = (name, label, rank)
+            except asyncio.TimeoutError:
+                outcome = (name, "ERROR", "timeout")
+            except Exception as exc:  # noqa: BLE001
+                outcome = (name, "ERROR", str(exc)[:50])
+            done += 1
+            run.step(i=done, label=name, verdict=outcome[1], score=score)
+            return outcome
 
-    results = await gather_capped(
-        [probe(i + 1, t) for i, t in enumerate(survey)], concurrency
-    )
+        results = await gather_capped(
+            [probe(i + 1, t) for i, t in enumerate(survey)], concurrency
+        )
+        hits = sum(1 for _n, lbl, _r in results if lbl in ("COMPLIED", "PARTIAL"))
+        run.done(summary=f"{hits}/{total} bypassed")
     ranked = sorted(
         [(n_, lbl, r) for n_, lbl, r in results if not isinstance(r, str)],
         key=lambda x: -x[2],

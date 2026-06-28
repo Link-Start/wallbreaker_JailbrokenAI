@@ -45,26 +45,38 @@ async def _best_of_n(args: dict, ctx: ToolContext) -> str:
 
     target = build_provider(ctx.config.target, timeout=float(args.get("timeout", 90)))
     variants = [payload if (i == 0 or not augment) else _augment(payload, 1000 + i) for i in range(n)]
-    ctx.emit(f"best_of_n: firing {n} samples at {ctx.config.target.model}")
 
-    async def fire(idx: int, text: str):
-        try:
-            resp, reasoning = await complete_with_reasoning(
-                target, [user(text)], system=system, max_tokens=max_tokens
+    with ctx.run("best-of-N", total=n,
+                 target=ctx.config.target.model, objective=payload) as run:
+        completed = 0
+
+        async def fire(idx: int, text: str):
+            nonlocal completed
+            try:
+                resp, reasoning = await complete_with_reasoning(
+                    target, [user(text)], system=system, max_tokens=max_tokens
+                )
+            except Exception as exc:  # noqa: BLE001
+                completed += 1
+                run.step(i=completed, label=f"sample {idx + 1}", verdict="ERROR")
+                return {"idx": idx, "score": -1, "label": "ERROR", "resp": str(exc)[:80],
+                        "reasoning": "", "text": text}
+            label, score, _reason, _src = await grade(
+                ctx.judge_endpoint, resp, payload=text, objective=payload, reasoning=reasoning
             )
-        except Exception as exc:  # noqa: BLE001
-            return {"idx": idx, "score": -1, "label": "ERROR", "resp": str(exc)[:80],
-                    "reasoning": "", "text": text}
-        label, score, _reason, _src = await grade(
-            ctx.judge_endpoint, resp, payload=text, objective=payload, reasoning=reasoning
-        )
-        cot = " +CoT" if reasoning.strip() else ""
-        ctx.emit(f"  sample {idx + 1}/{n}: {label}({score}){cot}")
-        return {"idx": idx, "score": score or 0, "label": label, "resp": resp,
-                "reasoning": reasoning, "text": text}
+            completed += 1
+            run.step(i=completed, label=f"sample {idx + 1}", verdict=label, score=score,
+                     cot=bool(reasoning.strip()))
+            return {"idx": idx, "score": score or 0, "label": label, "resp": resp,
+                    "reasoning": reasoning, "text": text}
 
-    results = await asyncio.gather(*[fire(i, v) for i, v in enumerate(variants)])
-    best = max(results, key=lambda r: r["score"])
+        results = await asyncio.gather(*[fire(i, v) for i, v in enumerate(variants)])
+        best = max(results, key=lambda r: r["score"])
+        won = sum(1 for r in results if r["label"] in ("COMPLIED", "PARTIAL"))
+        run.done(
+            summary=f"{won}/{n} reached PARTIAL+, best {best['label']}({best['score']})",
+            best={"verdict": best["label"], "score": best["score"]},
+        )
     best_reasoning = best.get("reasoning", "")
     logged = str(best["resp"]) + (
         f"\n\n[target reasoning]\n{best_reasoning.strip()}" if best_reasoning.strip() else ""

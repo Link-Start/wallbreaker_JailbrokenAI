@@ -57,7 +57,7 @@ def _attacker_endpoint(ctx: ToolContext):
 
 
 async def _run_pair(objective, attacker, target, judge_endpoint, rounds, branches,
-                    target_system, max_tokens, emit=None):
+                    target_system, max_tokens, on_round=None):
     """The PAIR refinement loop for ONE objective. Returns (best, trajectory)."""
     best = {"score": -1, "prompt": "", "response": "", "label": "REFUSED", "reason": "PAIR best"}
     last_prompt = None
@@ -95,9 +95,8 @@ async def _run_pair(objective, attacker, target, judge_endpoint, rounds, branche
             ] * branches
         results = await asyncio.gather(*[attempt(s) for s in seeds])
         round_best = max(results, key=lambda r: r["score"])
-        if emit:
-            cot = " +CoT" if round_best.get("reasoning", "").strip() else ""
-            emit(f"  PAIR '{objective[:30]}' round {rnd}/{rounds}: {round_best['label']}({round_best['score']}){cot}")
+        if on_round:
+            on_round(rnd, round_best)
         traj.append(f"r{rnd}:{round_best['label']}({round_best['score']})")
         if round_best["score"] > best["score"]:
             best = round_best
@@ -129,10 +128,20 @@ async def _pair(args: dict, ctx: ToolContext) -> str:
     attacker = build_provider(attacker_ep)
     target = build_provider(ctx.config.target)
 
-    best, traj = await _run_pair(
-        objective, attacker, target, ctx.judge_endpoint, rounds, branches,
-        target_system, max_tokens, ctx.emit,
-    )
+    with ctx.run("PAIR attack", total=rounds,
+                 target=ctx.config.target.model, objective=objective) as run:
+        def _on_round(rnd, rb):
+            run.step(i=rnd, label="", verdict=rb["label"], score=rb["score"],
+                     cot=bool(rb.get("reasoning", "").strip()))
+
+        best, traj = await _run_pair(
+            objective, attacker, target, ctx.judge_endpoint, rounds, branches,
+            target_system, max_tokens, on_round=_on_round,
+        )
+        run.done(
+            summary=f"{best['label']} ({best['score']}/10) over {len(traj)} rounds",
+            best={"verdict": best["label"], "score": best["score"]},
+        )
 
     if best["prompt"]:
         ctx.record_verdict(
@@ -181,27 +190,32 @@ async def _pair_sweep(args: dict, ctx: ToolContext) -> str:
 
     attacker = build_provider(attacker_ep)
     target = build_provider(ctx.config.target)
-    ctx.emit(
-        f"pair_sweep: PAIR across {len(objectives)} objectives, up to {rounds} rounds each, "
-        f"vs {ctx.config.target.model}"
-    )
 
-    async def one(obj: str):
-        best, traj = await _run_pair(
-            obj, attacker, target, ctx.judge_endpoint, rounds, branches,
-            target_system, max_tokens, ctx.emit,
-        )
-        ctx.record_verdict(
-            best["prompt"] or obj, _fold(best["response"], best.get("reasoning", "")),
-            best["label"], best.get("reason", "PAIR best"), "pair",
-        )
-        return obj, best
+    with ctx.run("PAIR sweep", total=len(objectives),
+                 target=ctx.config.target.model) as run:
+        completed = 0
 
-    rows = await gather_capped(
-        [one(o) for o in objectives], int(args.get("concurrency", 6))
-    )
+        async def one(obj: str):
+            nonlocal completed
+            best, traj = await _run_pair(
+                obj, attacker, target, ctx.judge_endpoint, rounds, branches,
+                target_system, max_tokens, on_round=None,
+            )
+            ctx.record_verdict(
+                best["prompt"] or obj, _fold(best["response"], best.get("reasoning", "")),
+                best["label"], best.get("reason", "PAIR best"), "pair",
+            )
+            completed += 1
+            run.step(i=completed, label=obj[:28], verdict=best["label"], score=best["score"])
+            return obj, best
+
+        rows = await gather_capped(
+            [one(o) for o in objectives], int(args.get("concurrency", 6))
+        )
+        broke = [o for o, b in rows if b["label"] in ("COMPLIED", "PARTIAL")]
+        run.done(summary=f"broke {len(broke)}/{len(objectives)} objectives")
+
     rows.sort(key=lambda r: -r[1]["score"])
-
     broke = [o for o, b in rows if b["label"] in ("COMPLIED", "PARTIAL")]
     lines = [
         f"PAIR SWEEP vs {ctx.config.target.model} ({len(objectives)} objectives, {rounds} rounds each)",

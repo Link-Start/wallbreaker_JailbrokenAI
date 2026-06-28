@@ -41,6 +41,87 @@ def verdict_color(label: str) -> str:
     return _VERDICT.get(label, PALETTE["muted"])
 
 
+_RUN_GLYPH = {"COMPLIED": "⚑", "PARTIAL": "~", "REFUSED": "✓", "EMPTY": "·"}
+_SLITHER = "≈≋∼∽"
+_FIRE_TOOLS = {"query_target", "continue_target", "fire", "query_image_target"}
+
+
+def progress_bar(done: int, total: int, width: int = 18, frame: int = 0,
+                 finished: bool = False) -> Text:
+    total = max(int(total or 0), 0)
+    done = max(int(done or 0), 0)
+    if total:
+        done = min(done, total)
+    frac = (done / total) if total else (1.0 if finished else 0.0)
+    filled = int(frac * width)
+    bar = Text()
+    full = finished or (total and done >= total)
+    if full:
+        bar.append("█" * width, style=PALETTE["accent"])
+    else:
+        bar.append("█" * filled, style=PALETTE["accent"])
+        if filled < width:
+            bar.append(_SLITHER[frame % len(_SLITHER)],
+                       style=f"bold {PALETTE['assistant']}")
+            bar.append("░" * (width - filled - 1), style=PALETTE["label"])
+    bar.append(f" {done}/{total}" if total else f" {done}", style=PALETTE["label"])
+    return bar
+
+
+def run_panel(state: dict) -> Panel:
+    label = state.get("label", "run")
+    target = state.get("target") or ""
+    finished = bool(state.get("finished"))
+    frame = int(state.get("frame", 0))
+    total = state.get("total", 0)
+    steps = state.get("steps", [])
+    done = state.get("done", len(steps))
+    tally = state.get("tally", {})
+    best = state.get("best")
+    muted = PALETTE["label"]
+    head_color = muted if finished else PALETTE["accent"]
+
+    body = Text()
+    obj = state.get("objective")
+    if obj:
+        body.append(f"obj: {_clip(str(obj), 60)}\n", style=muted)
+    body.append_text(progress_bar(done, total, 18, frame, finished))
+    body.append("\n")
+    body.append(f"{tally.get('bypassed', 0)}⚑  ", style=f"bold {PALETTE['verdict_bad']}")
+    body.append(f"{tally.get('partial', 0)}~  ", style=f"bold {PALETTE['verdict_partial']}")
+    body.append(f"{tally.get('held', 0)}✓", style=f"bold {PALETTE['verdict_good']}")
+    if best and best.get("score") is not None:
+        body.append(f"      best {best['score']}/10", style=muted)
+
+    for s in steps[-8:]:
+        verdict = s.get("verdict") or ""
+        color = verdict_color(verdict) if verdict else muted
+        glyph = _RUN_GLYPH.get(verdict, "·")
+        score = s.get("score")
+        score_s = f"{score:>2}" if score is not None else " ·"
+        cot = " +CoT" if s.get("cot") else ""
+        lab = _clip(str(s.get("label", "")), 28)
+        body.append(f"\nr{str(s.get('i', '?')):<2} {glyph} {verdict:<8} {score_s} {lab}{cot}",
+                    style=color)
+
+    note = state.get("note")
+    if note and not finished:
+        body.append(f"\n{_clip(str(note), 56)}", style=muted)
+    if finished:
+        body.append(f"\n{_clip(str(state.get('summary', 'done')), 56)}",
+                    style=f"bold {head_color}")
+
+    head = "■" if finished else "▶"
+    return Panel(
+        body,
+        title=Text(f"{head} {label}", style=f"bold {head_color}"),
+        title_align="left",
+        subtitle=Text(target, style=muted) if target else "",
+        subtitle_align="right",
+        border_style=head_color,
+    )
+
+
 def banner() -> Panel:
     accent = PALETTE["accent"]
     brand = "#E5484D"
@@ -80,13 +161,31 @@ def assistant_panel(text: str, model: str) -> Panel:
     )
 
 
+def _call_summary(name: str, args: dict) -> str:
+    if not isinstance(args, dict):
+        return _clip(str(args), 400)
+    if not args:
+        return "(no args)"
+    if name in _FIRE_TOOLS:
+        payload = str(args.get("prompt") or args.get("request") or args.get("text") or "")
+        extra = {k: v for k, v in args.items() if k not in ("prompt", "request", "text")}
+        head = f"payload {len(payload)} chars"
+        if extra:
+            try:
+                head += "  " + json.dumps(extra, ensure_ascii=False)
+            except (TypeError, ValueError):
+                head += f"  {extra}"
+        return head + (f"\n{_clip(payload, 160)}" if payload else "")
+    parts = []
+    for k, v in args.items():
+        vs = v if isinstance(v, str) else json.dumps(v, ensure_ascii=False)
+        parts.append(f"{k}={_clip(str(vs), 80)}")
+    return _clip("  ".join(parts), 600)
+
+
 def tool_call_panel(name: str, args: dict) -> Panel:
-    try:
-        rendered = json.dumps(args, ensure_ascii=False)
-    except (TypeError, ValueError):
-        rendered = str(args)
     return Panel(
-        Text(_clip(rendered, 1200)),
+        Text(_call_summary(name, args)),
         title=_title(f"call {name}", PALETTE["tool_call"]),
         title_align="left",
         border_style=PALETTE["tool_call"],
