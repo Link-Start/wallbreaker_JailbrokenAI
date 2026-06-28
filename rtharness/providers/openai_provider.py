@@ -17,7 +17,7 @@ from ..agent.messages import (
     ToolUseEvent,
     UsageEvent,
 )
-from .base import Provider, ProviderError
+from .base import Provider, ProviderError, parse_tool_args
 
 
 def _tools_to_wire(tools: list[dict]) -> list[dict]:
@@ -178,10 +178,7 @@ class OpenAIProvider(Provider):
 
         for idx in sorted(pending):
             slot = pending[idx]
-            try:
-                args = json.loads(slot["args"]) if slot["args"] else {}
-            except json.JSONDecodeError:
-                args = {"_raw": slot["args"]}
+            args = parse_tool_args(slot["args"])
             yield ToolUseEvent(
                 id=slot["id"] or f"call_{idx}", name=slot["name"], input=args
             )

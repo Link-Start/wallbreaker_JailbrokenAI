@@ -17,7 +17,7 @@ from ..agent.messages import (
     ToolUseEvent,
     UsageEvent,
 )
-from .base import Provider, ProviderError
+from .base import Provider, ProviderError, parse_tool_args
 
 ANTHROPIC_VERSION = "2023-06-01"
 
@@ -170,9 +170,6 @@ class AnthropicProvider(Provider):
 
         for idx in sorted(blocks):
             slot = blocks[idx]
-            try:
-                args = json.loads(slot["args"]) if slot["args"] else {}
-            except json.JSONDecodeError:
-                args = {"_raw": slot["args"]}
+            args = parse_tool_args(slot["args"])
             yield ToolUseEvent(id=slot["id"], name=slot["name"], input=args)
         yield StopEvent(stop_reason or ("tool_use" if blocks else "end_turn"))

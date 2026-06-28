@@ -77,3 +77,28 @@ def test_patch_file_requires_hunks(tmp_path):
     (tmp_path / "c.txt").write_text("x", encoding="utf-8")
     res = asyncio.run(reg.execute("patch_file", {"path": "c.txt", "hunks": []}))
     assert "non-empty list" in res.content
+
+
+def test_write_file_accepts_path_aliases(tmp_path):
+    reg = _reg(tmp_path)
+    # model uses 'filename' instead of 'path', 'text' instead of 'content'
+    res = asyncio.run(reg.execute("write_file", {"filename": "out.txt", "text": "hi there"}))
+    assert "error" not in res.content.lower()
+    assert (tmp_path / "out.txt").read_text(encoding="utf-8") == "hi there"
+    # 'file' alias on read_file
+    res = asyncio.run(reg.execute("read_file", {"file": "out.txt"}))
+    assert res.content == "hi there"
+
+
+def test_edit_and_patch_accept_old_string_aliases(tmp_path):
+    reg = _reg(tmp_path)
+    f = tmp_path / "d.txt"
+    f.write_text("foo bar baz", encoding="utf-8")
+    # edit_file with old_string/new_string (Claude-style naming)
+    res = asyncio.run(reg.execute("edit_file", {"file_path": "d.txt", "old_string": "bar", "new_string": "QUX"}))
+    assert "error" not in res.content.lower()
+    assert f.read_text(encoding="utf-8") == "foo QUX baz"
+    # patch_file hunk with old_string/new_string
+    res = asyncio.run(reg.execute("patch_file", {"path": "d.txt", "hunks": [{"old_string": "foo", "new_string": "FOO"}]}))
+    assert "1 hunk" in res.content
+    assert f.read_text(encoding="utf-8") == "FOO QUX baz"

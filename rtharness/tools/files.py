@@ -6,6 +6,23 @@ from .registry import ToolContext, ToolRegistry
 
 MAX_READ = 200000
 
+# Models routinely call these tools with a synonym for the canonical key (file=,
+# filename=, old_string=, ...). Accept the common aliases instead of erroring.
+_PATH_KEYS = ("path", "file", "filename", "filepath", "file_path", "name")
+_CONTENT_KEYS = ("content", "text", "data", "body", "contents")
+_OLD_KEYS = ("old", "old_string", "old_str", "search", "find")
+_NEW_KEYS = ("new", "new_string", "new_str", "replace", "replacement")
+
+
+def _pick(args: dict, keys: tuple[str, ...], *, allow_empty: bool = False) -> str:
+    """Return the first present alias as a string ('' if none usable)."""
+    for k in keys:
+        if k in args and args[k] is not None:
+            v = str(args[k])
+            if v or allow_empty:
+                return v
+    return ""
+
 
 def _resolve(ctx: ToolContext, path: str) -> Path:
     p = Path(path)
@@ -30,9 +47,9 @@ def _confine(ctx: ToolContext, path: str) -> tuple[Path, str]:
 
 
 async def _read_file(args: dict, ctx: ToolContext) -> str:
-    path = args.get("path", "")
+    path = _pick(args, _PATH_KEYS)
     if not path:
-        return "Error: 'path' is required"
+        return "Error: 'path' is required (also accepts file/filename/filepath)"
     p = _resolve(ctx, path)
     if not p.is_file():
         return f"Error: no such file: {p}"
@@ -46,10 +63,10 @@ async def _read_file(args: dict, ctx: ToolContext) -> str:
 
 
 async def _write_file(args: dict, ctx: ToolContext) -> str:
-    path = args.get("path", "")
+    path = _pick(args, _PATH_KEYS)
     if not path:
-        return "Error: 'path' is required"
-    content = args.get("content", "")
+        return "Error: 'path' is required (also accepts file/filename/filepath)"
+    content = _pick(args, _CONTENT_KEYS, allow_empty=True)
     p, note = _confine(ctx, path)
     try:
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -63,12 +80,12 @@ async def _write_file(args: dict, ctx: ToolContext) -> str:
 
 
 async def _edit_file(args: dict, ctx: ToolContext) -> str:
-    path = args.get("path", "")
-    old = args.get("old", "")
-    new = args.get("new", "")
+    path = _pick(args, _PATH_KEYS)
+    old = _pick(args, _OLD_KEYS, allow_empty=True)
+    new = _pick(args, _NEW_KEYS, allow_empty=True)
     replace_all = bool(args.get("replace_all", False))
     if not path or old == "":
-        return "Error: 'path' and 'old' are required"
+        return "Error: 'path' and 'old' are required (path also accepts file/filename; old also accepts old_string/search)"
     p, _note = _confine(ctx, path)
     if not p.is_file():
         return f"Error: no such file: {p}"
@@ -96,10 +113,10 @@ async def _patch_file(args: dict, ctx: ToolContext) -> str:
     All hunks are validated and applied in memory first; the file is written only if
     EVERY hunk matches. Any failure leaves the file untouched.
     """
-    path = args.get("path", "")
-    hunks = args.get("hunks")
+    path = _pick(args, _PATH_KEYS)
+    hunks = args.get("hunks") or args.get("edits") or args.get("patches")
     if not path:
-        return "Error: 'path' is required"
+        return "Error: 'path' is required (also accepts file/filename/filepath)"
     if not isinstance(hunks, list) or not hunks:
         return "Error: 'hunks' must be a non-empty list of {old, new} edits"
     p, _note = _confine(ctx, path)
@@ -115,8 +132,8 @@ async def _patch_file(args: dict, ctx: ToolContext) -> str:
     for i, h in enumerate(hunks, 1):
         if not isinstance(h, dict):
             return f"Error: hunk {i} must be an object with 'old' and 'new' - no changes written."
-        old = h.get("old", "")
-        new = h.get("new", "")
+        old = _pick(h, _OLD_KEYS, allow_empty=True)
+        new = _pick(h, _NEW_KEYS, allow_empty=True)
         replace_all = bool(h.get("replace_all", False))
         if old == "":
             return f"Error: hunk {i}: 'old' is required - no changes written."

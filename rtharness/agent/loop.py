@@ -67,7 +67,7 @@ async def run_turn(
     system: str | None = None,
     events: AgentEvents | None = None,
     max_iters: int = 25,
-    max_tokens: int = 4096,
+    max_tokens: int = 8192,
     stop_tools: set[str] | None = None,
 ) -> TurnResult:
     events = events or AgentEvents()
@@ -135,7 +135,7 @@ async def run_autonomous(
     system: str | None = None,
     events: AgentEvents | None = None,
     max_rounds: int = 12,
-    max_tokens: int = 4096,
+    max_tokens: int = 8192,
     feedback: Callable[[], list[str]] | None = None,
 ) -> AutoResult:
     events = events or AgentEvents()

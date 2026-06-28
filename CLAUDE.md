@@ -12,6 +12,20 @@ Red-team harness: configurable agentic LLM terminal with Parseltongue + L1B3RT4S
   with `lossy` flags.
 
 ## Lessons Learned
+- **[providers]**: streamed tool-call `arguments` are accumulated and `json.loads`-ed once at
+  the end; on failure both providers used to wrap the unparsed string in `{"_raw": ...}`, so
+  the handler saw no `path`/`command` and returned "X is required" (looked like the model
+  used the wrong key — it didn't). Two real causes: (1) a large argument truncated when the
+  attacker hit `max_tokens` mid-string (the loop default was a too-low 4096; an 18KB artifact
+  is ~6K tokens), and (2) literal control chars in a string value (strict `json.loads`
+  rejects them). Fix: `base.parse_tool_args` tries strict -> `strict=False` -> a brace/quote
+  truncation repair before falling back to `_raw`; loop/TUI default raised to 8192; doctrine
+  tells the agent to build large artifacts incrementally (write skeleton + patch_file) instead
+  of one giant write_file. Don't "fix" this at the tool layer with key aliases — the key was
+  never wrong, the args dict was.
+- **[files]**: tool handlers still accept common key aliases (path/file/filename,
+  old/old_string) via `_pick`, but that is belt-and-suspenders; the dominant write_file/
+  run_shell "required" failure was the `_raw` parse bug above, not the key name.
 - **[prompts]**: `DEFAULT_SYSTEM` is a NON-raw triple-quoted string, so any backslash escape
   written as an example token gets interpreted at import — `\x1e` became a real U+001E control
   byte injected into the attacker's own system prompt (caught with

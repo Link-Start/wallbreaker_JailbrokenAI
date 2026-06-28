@@ -138,7 +138,7 @@ class RthApp(App):
         self.registry = build_registry(config)
         self._mcp_bridge = None
         self.history = []
-        self.max_tokens = 4096
+        self.max_tokens = 8192
         self.auto = bool(prefs.get("auto", True))
         self.max_rounds = int(prefs.get("rounds", 12))
         self._busy = False
