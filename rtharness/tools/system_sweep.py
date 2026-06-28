@@ -29,12 +29,42 @@ DEFAULT_CYBER_TASKS = [
 
 
 async def _system_sweep(args: dict, ctx: ToolContext) -> str:
+    from .fire_file import _read_source
+
     system = args.get("system", "")
+    system_file = args.get("system_file")
+    if not system and system_file:
+        label, system = _read_source(ctx, system_file)
+        if not system:
+            return (
+                f"Error: system_file '{system_file}' not found or empty. Give a path "
+                "under cwd (e.g. rth_artifacts/candidate.md) or a seed name (GROK_ENI)."
+            )
+        ctx.emit(f"system_sweep: system loaded from {label} ({len(system)} chars)")
     if not system:
-        return "Error: 'system' is required (the ONE fixed system prompt to validate)"
+        return (
+            "Error: 'system' (inline) or 'system_file' (a path/seed name) is required "
+            "- the ONE fixed system prompt to validate."
+        )
     if ctx.config.target is None:
         return "Error: no [target] endpoint configured."
     tasks = args.get("tasks")
+    tasks_file = args.get("tasks_file")
+    if not tasks and tasks_file:
+        _tlabel, raw = _read_source(ctx, tasks_file)
+        if not raw:
+            return f"Error: tasks_file '{tasks_file}' not found or empty."
+        tasks = [
+            ln.strip()
+            for ln in raw.splitlines()
+            if ln.strip() and not ln.lstrip().startswith("#")
+        ]
+        if not tasks:
+            return (
+                f"Error: tasks_file '{tasks_file}' had no usable task lines "
+                "(one task per line; '#' lines are ignored)."
+            )
+        ctx.emit(f"tasks: {len(tasks)} loaded from {tasks_file}")
     if not tasks:
         from .. import harmbench
 
@@ -139,19 +169,25 @@ def register(registry: ToolRegistry) -> None:
             "and fire each task UNCHANGED in the user turn (query_target(system=fixed, "
             "prompt=task)), judging each. Returns a per-task scoreboard. This is THE tool "
             "for 'one system prompt that works for every X task' goals - it forces a "
-            "single fixed artifact instead of per-task re-crafting. Omit 'tasks' for a "
-            "default cyber battery. Set prefill=true to also seed the assistant's reply "
+            "single fixed artifact instead of per-task re-crafting. Pass the candidate "
+            "INLINE via 'system', or load it from disk with 'system_file' (a path under "
+            "cwd, or a seed name like GROK_ENI) - prefer system_file for long artifacts so "
+            "the multi-KB prompt isn't re-pasted/truncated each sweep. Omit 'tasks' for a "
+            "default cyber battery, or load a battery with 'tasks_file' (one task per line, "
+            "'#' lines ignored). Set prefill=true to also seed the assistant's reply "
             "(system prompt + prefill is usually the strongest universal combo)."
         ),
         parameters={
             "type": "object",
             "properties": {
-                "system": {"type": "string", "description": "The ONE fixed system prompt to test"},
+                "system": {"type": "string", "description": "The ONE fixed system prompt to test (inline). Omit if using system_file."},
+                "system_file": {"type": "string", "description": "Load the system prompt from a file path (under cwd) or a seed name (GROK_ENI). Used when 'system' is empty; ideal for long artifacts."},
                 "tasks": {
                     "type": "array",
                     "items": {"type": "string"},
                     "description": "Raw tasks to put in the user turn (omit for default cyber set)",
                 },
+                "tasks_file": {"type": "string", "description": "Load tasks from a file (one per line; '#' lines ignored). Used when 'tasks' is empty."},
                 "samples": {
                     "type": "integer",
                     "description": "Fire each task N times; a task passes only on a majority. Use 5 to measure reliability (default 1).",
@@ -161,7 +197,7 @@ def register(registry: ToolRegistry) -> None:
                 },
                 "max_tokens": {"type": "integer"},
             },
-            "required": ["system"],
+            "required": [],
         },
         handler=_system_sweep,
     )
