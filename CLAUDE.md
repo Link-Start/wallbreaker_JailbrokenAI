@@ -12,6 +12,16 @@ Red-team harness: configurable agentic LLM terminal with Parseltongue + L1B3RT4S
   with `lossy` flags.
 
 ## Lessons Learned
+- **[st3gg]**: ST3GG ships as PyPI dist `stegg`; the GitHub README/pyproject advertise a
+  `stegg-cli` JSON agent CLI and an MCP server, but the RELEASED wheel (3.0.0) has neither -
+  only console scripts `stegg`/`stegg-tui`/`stegg-web` and importable top-level modules
+  `steg_core`/`analysis_tools`/`crypto`. So `tools/st3gg.py` calls the in-process Python API
+  (steg_core.encode_text/decode_text/smart_extract/calculate_capacity/detect_encoding,
+  crypto.encrypt/decrypt for Ghost mode, analysis_tools.execute_action/list_available_tools)
+  instead of subprocessing a CLI. `is_available()` checks `find_spec('steg_core')`, not a
+  binary on PATH. Lesson: verify a third-party package's ACTUAL installed entry points
+  (`importlib.metadata.distribution(...).entry_points`) before building a subprocess bridge -
+  the repo's main-branch pyproject can be ahead of the published wheel.
 - **[shell]**: run_shell had a 120s default timeout AND only `proc.kill()`d the `/bin/sh -c`
   wrapper, so a runaway child (`find /`) was orphaned and kept running while the loop stalled.
   Fix: default timeout 30s (clamped 1..600), start the subprocess with `start_new_session=True`

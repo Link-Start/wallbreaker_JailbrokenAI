@@ -25,6 +25,9 @@ barcodes = [
     "python-barcode>=0.15",
     "pillow>=10.0",
 ]
+stego = [
+    "stegg[crypto]>=3.0",
+]
 
 [project.scripts]
 rth = "rtharness.cli:main"
