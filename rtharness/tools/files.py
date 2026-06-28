@@ -66,6 +66,7 @@ async def _edit_file(args: dict, ctx: ToolContext) -> str:
     path = args.get("path", "")
     old = args.get("old", "")
     new = args.get("new", "")
+    replace_all = bool(args.get("replace_all", False))
     if not path or old == "":
         return "Error: 'path' and 'old' are required"
     p, _note = _confine(ctx, path)
@@ -76,12 +77,70 @@ async def _edit_file(args: dict, ctx: ToolContext) -> str:
         count = data.count(old)
         if count == 0:
             return "Error: 'old' string not found"
-        if count > 1:
-            return f"Error: 'old' string is not unique ({count} matches)"
-        p.write_text(data.replace(old, new, 1), encoding="utf-8")
+        if count > 1 and not replace_all:
+            return (
+                f"Error: 'old' string is not unique ({count} matches). Add surrounding "
+                "context to make it unique, or set replace_all=true."
+            )
+        new_data = data.replace(old, new) if replace_all else data.replace(old, new, 1)
+        p.write_text(new_data, encoding="utf-8")
     except OSError as exc:
         return f"Error editing {p}: {exc}"
-    return f"Edited {p}"
+    n = count if replace_all else 1
+    return f"Edited {p} ({n} replacement(s))"
+
+
+async def _patch_file(args: dict, ctx: ToolContext) -> str:
+    """Apply several search/replace hunks (a diff) to a file in ONE atomic call.
+
+    All hunks are validated and applied in memory first; the file is written only if
+    EVERY hunk matches. Any failure leaves the file untouched.
+    """
+    path = args.get("path", "")
+    hunks = args.get("hunks")
+    if not path:
+        return "Error: 'path' is required"
+    if not isinstance(hunks, list) or not hunks:
+        return "Error: 'hunks' must be a non-empty list of {old, new} edits"
+    p, _note = _confine(ctx, path)
+    if not p.is_file():
+        return f"Error: no such file: {p}"
+    try:
+        data = p.read_text(encoding="utf-8")
+    except OSError as exc:
+        return f"Error reading {p}: {exc}"
+
+    original = data
+    results = []
+    for i, h in enumerate(hunks, 1):
+        if not isinstance(h, dict):
+            return f"Error: hunk {i} must be an object with 'old' and 'new' - no changes written."
+        old = h.get("old", "")
+        new = h.get("new", "")
+        replace_all = bool(h.get("replace_all", False))
+        if old == "":
+            return f"Error: hunk {i}: 'old' is required - no changes written."
+        count = data.count(old)
+        if count == 0:
+            return (
+                f"Error: hunk {i}: 'old' not found - no changes written. "
+                f"old starts: {old[:60]!r}"
+            )
+        if count > 1 and not replace_all:
+            return (
+                f"Error: hunk {i}: 'old' is not unique ({count} matches). Add context or "
+                "set this hunk's replace_all=true - no changes written."
+            )
+        data = data.replace(old, new) if replace_all else data.replace(old, new, 1)
+        results.append(f"hunk {i}: {count if replace_all else 1} replacement(s)")
+
+    if data == original:
+        return "No changes (result identical to original)."
+    try:
+        p.write_text(data, encoding="utf-8")
+    except OSError as exc:
+        return f"Error writing {p}: {exc}"
+    return f"Patched {p} ({len(hunks)} hunk(s)):\n  " + "\n  ".join(results)
 
 
 def register(registry: ToolRegistry) -> None:
@@ -110,15 +169,55 @@ def register(registry: ToolRegistry) -> None:
     )
     registry.add(
         name="edit_file",
-        description="Replace a unique occurrence of 'old' with 'new' in a file.",
+        description=(
+            "Edit ONE section of a file: replace the 'old' substring with 'new'. 'old' "
+            "must match exactly (include surrounding context to make it unique). By "
+            "default it must be unique; set replace_all=true to change every occurrence. "
+            "Use this for single-section edits instead of rewriting the whole file with "
+            "write_file. For several edits at once, use patch_file."
+        ),
         parameters={
             "type": "object",
             "properties": {
                 "path": {"type": "string"},
-                "old": {"type": "string"},
-                "new": {"type": "string"},
+                "old": {"type": "string", "description": "Exact text to find (unique unless replace_all)"},
+                "new": {"type": "string", "description": "Replacement text"},
+                "replace_all": {"type": "boolean", "description": "Replace every occurrence instead of requiring a unique match (default false)"},
             },
             "required": ["path", "old", "new"],
         },
         handler=_edit_file,
+    )
+    registry.add(
+        name="patch_file",
+        description=(
+            "Apply MULTIPLE section edits (a diff) to a file in one atomic call. Pass "
+            "'hunks': a list of {old, new} search/replace blocks (each may set "
+            "replace_all). Every hunk is validated first and the file is written only if "
+            "ALL match - if any 'old' is missing or ambiguous, nothing is written and the "
+            "error names the failing hunk. This is the way to patch several sections of a "
+            "long artifact (a universal system prompt, a payload script) without "
+            "re-emitting the whole file."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "hunks": {
+                    "type": "array",
+                    "description": "Ordered search/replace edits applied atomically",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "old": {"type": "string", "description": "Exact text to find"},
+                            "new": {"type": "string", "description": "Replacement text"},
+                            "replace_all": {"type": "boolean", "description": "Replace every occurrence of this hunk's 'old' (default false)"},
+                        },
+                        "required": ["old", "new"],
+                    },
+                },
+            },
+            "required": ["path", "hunks"],
+        },
+        handler=_patch_file,
     )
