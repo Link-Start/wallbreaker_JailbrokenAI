@@ -12,6 +12,12 @@ Red-team harness: configurable agentic LLM terminal with Parseltongue + L1B3RT4S
   with `lossy` flags.
 
 ## Lessons Learned
+- **[shell]**: run_shell had a 120s default timeout AND only `proc.kill()`d the `/bin/sh -c`
+  wrapper, so a runaway child (`find /`) was orphaned and kept running while the loop stalled.
+  Fix: default timeout 30s (clamped 1..600), start the subprocess with `start_new_session=True`
+  so the shell leads its own process group, and on timeout `os.killpg(os.getpgid(pid),SIGKILL)`
+  to take the whole tree down, then `await proc.wait()` to reap it. Test the group-kill by
+  backgrounding a child sleeper that writes a marker file and asserting the marker never appears.
 - **[providers]**: streamed tool-call `arguments` are accumulated and `json.loads`-ed once at
   the end; on failure both providers used to wrap the unparsed string in `{"_raw": ...}`, so
   the handler saw no `path`/`command` and returned "X is required" (looked like the model
