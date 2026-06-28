@@ -46,7 +46,7 @@ def banner() -> Panel:
     brand = "#E5484D"
     snake = PALETTE["assistant"]
     art = Text()
-    art.append("  ▐▛███▜▌\n", style=f"bold {accent}")
+    art.append("   ▐▛███▜▌\n", style=f"bold {accent}")
     art.append("  ▝▜█████▛▘", style=f"bold {accent}")
     art.append("     🦀  ⚔  🐍\n")
     art.append("    ▘▘ ▝▝\n", style=f"bold {accent}")
