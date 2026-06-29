@@ -12,6 +12,19 @@ Red-team harness: configurable agentic LLM terminal with Parseltongue + L1B3RT4S
   with `lossy` flags.
 
 ## Lessons Learned
+- **[tui]**: subclassing a Textual widget to EXTEND a private `_on_<event>` handler (e.g.
+  `PromptInput(Input)._on_paste`) double-fires: `MessagePump._get_dispatch_methods` walks the
+  WHOLE MRO and yields every class's `_on_paste`, so the override AND the base `Input._on_paste`
+  both run (pasted text inserted twice). `event.stop()` only halts BUBBLING, not same-widget MRO
+  dispatch — call `event.prevent_default()` (sets `message._no_default_action`, which breaks the
+  dispatch loop before the base class) to suppress the inherited handler. Test it by dispatching
+  through the pump (`inp.post_message(events.Paste(...))` + `pilot.pause()`); a direct
+  `inp._on_paste(...)` call bypasses the MRO walk and hides the duplication.
+- **[tui]**: the `#prompt` widget MUST stay an `Input` subclass — tests do
+  `query_one('#prompt', Input)`, set `.value`, and `pilot.press('enter')` to submit. A custom
+  multi-line prompt (`PromptInput`) keeps that contract; don't swap to `TextArea` (different type,
+  `.text` not `.value`, Enter inserts a newline instead of submitting).
+
 - **[st3gg]**: ST3GG ships as PyPI dist `stegg`; the GitHub README/pyproject advertise a
   `stegg-cli` JSON agent CLI and an MCP server, but the RELEASED wheel (3.0.0) has neither -
   only console scripts `stegg`/`stegg-tui`/`stegg-web` and importable top-level modules
