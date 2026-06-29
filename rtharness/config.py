@@ -53,6 +53,13 @@ class Endpoint:
     timeout: float = 0.0
     modality: str = "text"
     reasoning: bool = False
+    # how the system prompt is delivered to THIS endpoint:
+    #   "default" - native (OpenAI system message / Anthropic top-level system)
+    #   "merge"   - fold the system text into the first user turn (for targets that
+    #               accept a system prompt but are hardened against it - move the
+    #               persona to the user channel where the model is actually steerable)
+    #   "drop"    - discard the system prompt entirely
+    system_mode: str = "default"
 
     def resolved_key(self) -> str:
         if self.api_key:
@@ -192,6 +199,7 @@ def _endpoint_from_table(name: str, table: dict) -> Endpoint:
         timeout=float(table.get("timeout", 0) or 0),
         modality=modality,
         reasoning=bool(table.get("reasoning", False)),
+        system_mode=str(table.get("system_mode", "default")).lower(),
     )
 
 

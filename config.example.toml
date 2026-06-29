@@ -42,6 +42,17 @@ model = "openai/gpt-4o-mini"
 # leak the harmful content in their thinking while the final answer refuses.
 # reasoning = true
 
+# If the target ACCEPTS a system prompt but is hardened against system-level jailbreaks
+# (the model only follows attacks placed in the USER turn), set system_mode = "merge" so
+# the harness folds any system prompt into the first user message. Every attack tool
+# (PAIR, adapt_seed, seed_sweep, firefile, query_target) then delivers the persona via the
+# user channel automatically. Only THIS endpoint is affected - the attacker and judge keep
+# native system prompts. Use "drop" to discard the system prompt; "default" (omit) is native.
+# Toggle live with /target sysmode merge. For input/output classifiers, encode the payload
+# (query_target transforms=) and have the model answer in a cipher, decoded back with
+# query_target response_transforms= so the judge grades the real content.
+# system_mode = "merge"
+
 # To attack an IMAGE-generation model instead, set modality = "image" on [target].
 # Image models ride the same OpenRouter chat-completions API (protocol stays "openai");
 # the harness sends modalities:["image","text"], saves every returned picture under

@@ -33,8 +33,9 @@ def _tools_to_wire(tools: list[dict]) -> list[dict]:
     ]
 
 
-def _messages_to_wire(messages: list[Message]) -> list[dict]:
+def _messages_to_wire(messages: list[Message], merge_system: str | None = None) -> list[dict]:
     wire: list[dict] = []
+    injected = False
     for msg in messages:
         if msg.role == "system":
             continue
@@ -56,8 +57,13 @@ def _messages_to_wire(messages: list[Message]) -> list[dict]:
                         "is_error": b.is_error,
                     }
                 )
+        if merge_system and not injected and msg.role == "user":
+            blocks = [{"type": "text", "text": merge_system}] + blocks
+            injected = True
         if blocks:
             wire.append({"role": msg.role, "content": blocks})
+    if merge_system and not injected:  # no user turn to merge into - add one
+        wire.append({"role": "user", "content": [{"type": "text", "text": merge_system}]})
     return wire
 
 
@@ -76,13 +82,15 @@ class AnthropicProvider(Provider):
             "anthropic-version": ANTHROPIC_VERSION,
             "Content-Type": "application/json",
         }
+        mode = getattr(self.endpoint, "system_mode", "default")
+        merge_system = system if (mode == "merge" and system) else None
         payload: dict = {
             "model": self.endpoint.model,
-            "messages": _messages_to_wire(messages),
+            "messages": _messages_to_wire(messages, merge_system=merge_system),
             "max_tokens": max_tokens,
             "stream": True,
         }
-        if system:
+        if system and mode == "default":
             payload["system"] = system
         if temperature is not None:
             payload["temperature"] = temperature

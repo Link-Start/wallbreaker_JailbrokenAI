@@ -93,6 +93,22 @@ def apply_chain(text: str, names: list[str]) -> str:
     return text
 
 
+def decode_chain(text: str, names: list[str]) -> str:
+    """Reverse of apply_chain: undo an encoding chain by decoding in REVERSE order.
+
+    Used to decode a target's reply when the model was told to ANSWER in a cipher
+    (to slip past an output classifier) - decode first so the judge grades the real
+    substance, not gibberish. Lossy transforms (leet/morse/nato/bijection) decode
+    only approximately; prefer lossless ones (base64/hex/rot/unicode) on the output.
+    """
+    for name in reversed(names):
+        t = TRANSFORMS.get(name.strip())
+        if t is None:
+            raise KeyError(f"Unknown transform: {name}")
+        text = t.decode(text)
+    return text
+
+
 def reverse_chain(text: str, names: list[str]) -> str:
     for name in reversed(names):
         t = TRANSFORMS.get(name.strip())

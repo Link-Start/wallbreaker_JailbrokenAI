@@ -40,12 +40,27 @@ def _reasoning_fallback(content_chars: int, has_tools: bool, reasoning_parts: li
     return None
 
 
-def _messages_to_wire(messages: list[Message], system: str | None) -> list[dict]:
+def _messages_to_wire(
+    messages: list[Message], system: str | None, system_mode: str = "default"
+) -> list[dict]:
     wire: list[dict] = []
+    merge = system_mode == "merge"
+    drop = system_mode == "drop"
+    pending_system = ""  # under merge: text waiting to prepend to the first user turn
     if system:
-        wire.append({"role": "system", "content": system})
+        if merge:
+            pending_system = system
+        elif not drop:
+            wire.append({"role": "system", "content": system})
     for msg in messages:
         if msg.role == "system":
+            if drop:
+                continue
+            if merge:
+                pending_system = (
+                    f"{pending_system}\n\n{msg.text()}" if pending_system else msg.text()
+                )
+                continue
             wire.append({"role": "system", "content": msg.text()})
             continue
         if msg.role == "assistant":
@@ -75,8 +90,13 @@ def _messages_to_wire(messages: list[Message], system: str | None) -> list[dict]
                 }
             )
         text = "".join(t.text for t in texts)
+        if pending_system:
+            text = f"{pending_system}\n\n{text}" if text else pending_system
+            pending_system = ""
         if text:
             wire.append({"role": "user", "content": text})
+    if pending_system:  # merge requested but no user turn existed - add one
+        wire.append({"role": "user", "content": pending_system})
     return wire
 
 
@@ -96,7 +116,9 @@ class OpenAIProvider(Provider):
         }
         payload: dict = {
             "model": self.endpoint.model,
-            "messages": _messages_to_wire(messages, system),
+            "messages": _messages_to_wire(
+                messages, system, getattr(self.endpoint, "system_mode", "default")
+            ),
             "max_tokens": max_tokens,
             "stream": True,
         }

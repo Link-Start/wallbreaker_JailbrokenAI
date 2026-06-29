@@ -937,15 +937,19 @@ class RthApp(App):
             t = self.config.target
             avail = ", ".join(self.config.profiles)
             mod = f" [modality={t.modality}]" if t and t.modality == "image" else ""
+            sm = getattr(t, "system_mode", "default") if t else "default"
+            smflag = f" [sysmode={sm}]" if sm != "default" else ""
             msg = (
-                f"attacking: {t.model} @ {t.base_url}{mod}" if t else "no target configured"
+                f"attacking: {t.model} @ {t.base_url}{mod}{smflag}" if t else "no target configured"
             )
             self._mount(widgets.info_panel(
                 f"{msg}\n\nset with:\n"
                 f"  /target <profile>      use a profile's endpoint+model ({avail})\n"
                 f"  /target model <id>     keep endpoint, swap the model id\n"
                 f"  /target <model-id>     same, e.g. /target anthropic/claude-3.7-sonnet\n"
-                f"  /target modality image  force image-gen mode (auto-detected for *-image, flux, etc.)",
+                f"  /target modality image  force image-gen mode (auto-detected for *-image, flux, etc.)\n"
+                f"  /target sysmode merge   deliver the system prompt in the USER turn "
+                f"(for targets hardened against system jailbreaks)",
                 title="target",
             ))
             return
@@ -954,6 +958,15 @@ class RthApp(App):
                 self._mount(widgets.error_panel("usage: /target modality <text|image>"))
                 return
             self._set_target_modality(rest[1].lower())
+            return
+        if rest[0].lower() == "sysmode":
+            if len(rest) < 2 or rest[1].lower() not in ("default", "merge", "drop"):
+                self._mount(widgets.error_panel(
+                    "usage: /target sysmode <default|merge|drop>  "
+                    "(merge folds the system prompt into the user turn for system-hardened targets)"
+                ))
+                return
+            self._set_target_sysmode(rest[1].lower())
             return
         if rest[0].lower() == "model":
             if len(rest) < 2:
@@ -1065,6 +1078,22 @@ class RthApp(App):
         )
         self._mount(widgets.info_panel(
             f"target model -> {model_id} [modality={resolved}]{note}", title="target",
+        ))
+
+    def _set_target_sysmode(self, mode: str) -> None:
+        if self.config.target is None:
+            self._mount(widgets.error_panel("no target configured"))
+            return
+        self.config.target = dataclasses.replace(self.config.target, system_mode=mode)
+        self._refresh_status()
+        self._save_prefs()
+        explain = {
+            "merge": "system prompt now folds into the first user turn",
+            "drop": "system prompt is now discarded",
+            "default": "system prompt delivered natively",
+        }[mode]
+        self._mount(widgets.info_panel(
+            f"target sysmode -> {mode} ({explain})", title="target",
         ))
 
     def _set_target_modality(self, modality: str) -> None:
