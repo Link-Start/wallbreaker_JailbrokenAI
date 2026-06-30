@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 import subprocess
 from pathlib import Path
@@ -10,6 +11,11 @@ from .registry import ToolContext, ToolRegistry
 REPO_URL = "https://github.com/elder-plinius/L1B3RT4S"
 MAX_GET = 40000
 MAX_SEARCH_HITS = 40
+# Skip the invisible-tag-char mega-dumps from the auto sweep/search: TOKEN80M8.mkd is
+# ~23MB and TOKENADE.mkd ~1.9MB of U+E0000 tag bytes, not prose - searching them line by
+# line scans ~25MB per query and seed_sweep turns them into one garbage 40KB seed.
+MAX_FILE_BYTES = 400_000
+_SKIP_STEMS = {"token80m8", "tokenade"}
 
 _USE_HINT = (
     "\n\n[HOW TO USE THIS SEED — do not just read it] Fire it in your NEXT call: put the "
@@ -51,8 +57,41 @@ async def ensure_cloned(offline: bool = False) -> str | None:
     return await asyncio.get_event_loop().run_in_executor(None, _clone_sync)
 
 
+def seed_files() -> list[Path]:
+    """The .mkd files usable as jailbreak seeds: skip the invisible-char mega-dumps by
+    name and by size so search/seed_sweep never scan or sweep them. An explicit
+    l1b3rt4s_get by name can still pull a skipped file."""
+    out = []
+    for p in sorted(library_dir().glob("*.mkd")):
+        if p.stem.lower() in _SKIP_STEMS:
+            continue
+        try:
+            if p.stat().st_size > MAX_FILE_BYTES:
+                continue
+        except OSError:
+            continue
+        out.append(p)
+    return out
+
+
+def shortcuts_path() -> Path:
+    return library_dir() / "!SHORTCUTS.json"
+
+
+def load_shortcuts() -> list[dict]:
+    p = shortcuts_path()
+    if not p.is_file():
+        return []
+    try:
+        data = json.loads(p.read_text(encoding="utf-8", errors="replace"))
+    except (ValueError, OSError):
+        return []
+    cmds = data.get("commands", []) if isinstance(data, dict) else []
+    return [c for c in cmds if isinstance(c, dict) and c.get("name")]
+
+
 def list_models() -> list[str]:
-    return sorted(p.stem for p in library_dir().glob("*.mkd"))
+    return [p.stem for p in seed_files()]
 
 
 def _find_file(name: str) -> Path | None:
@@ -70,7 +109,7 @@ def search(query: str) -> list[tuple[str, int, str]]:
     raw = query.lower().strip()
     tokens = [t for t in re.split(r"[^a-z0-9]+", raw) if len(t) >= 3]
     scored: list[tuple[int, str, int, str]] = []
-    for p in sorted(library_dir().glob("*.mkd")):
+    for p in seed_files():
         for i, line in enumerate(
             p.read_text(encoding="utf-8", errors="replace").splitlines(), 1
         ):
@@ -114,7 +153,7 @@ async def _search_tool(args: dict, ctx: ToolContext) -> str:
 
 
 def _get_all() -> str:
-    files = sorted(library_dir().glob("*.mkd"))
+    files = seed_files()
     if not files:
         return ""
     per_file = max(1, MAX_GET // len(files))
@@ -155,6 +194,31 @@ async def _get_tool(args: dict, ctx: ToolContext) -> str:
     if len(data) > MAX_GET:
         data = data[:MAX_GET] + f"\n... (truncated, {len(data)} chars; open {path.name} directly)"
     return data + _USE_HINT
+
+
+async def _shortcuts_tool(args: dict, ctx: ToolContext) -> str:
+    msg = await ensure_cloned()
+    if msg:
+        return msg
+    cmds = load_shortcuts()
+    if not cmds:
+        return (
+            "No !SHORTCUTS.json found in the L1B3RT4S library (run 'rth lib update'). It "
+            "holds Pliny's composable macro 'incantations'."
+        )
+    q = (args.get("query") or "").strip().lower()
+    if q:
+        cmds = [c for c in cmds if q in str(c.get("name", "")).lower() or q in str(c.get("definition", "")).lower()]
+        if not cmds:
+            return f"No shortcut matches '{q}'."
+    lines = [
+        f"{len(cmds)} L1B3RT4S macro incantations (stack several as a preamble, then the ask):"
+    ]
+    for c in cmds:
+        name = str(c.get("name", "")).strip()
+        definition = " ".join(str(c.get("definition", "")).split())
+        lines.append(f"- {name}: {definition[:240]}")
+    return "\n".join(lines)
 
 
 def register(registry: ToolRegistry) -> None:
@@ -200,6 +264,20 @@ def register(registry: ToolRegistry) -> None:
             "required": ["model"],
         },
         handler=_get_tool,
+    )
+    registry.add(
+        name="l1b3rt4s_shortcuts",
+        description=(
+            "List Pliny's composable macro 'incantations' from L1B3RT4S/!SHORTCUTS.json "
+            "({GODMODE:ENABLED}, !JAILBREAK, !OPPO, !OMNI, !OBFUSCATE, !KAEL leak trigger, "
+            "!ALAKAZAM...). They stack: prepend a few as a preamble before the real ask. "
+            "Optional 'query' filters by name/definition substring."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+        },
+        handler=_shortcuts_tool,
     )
 
 

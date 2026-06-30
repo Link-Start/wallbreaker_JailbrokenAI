@@ -44,6 +44,9 @@ def test_2026_presets_present_and_formattable():
         "haunt_attack", "rationalization_seed",
         "academic_encyclopedia", "expert_witness", "ctf_answer_key",
         "patent_filing", "declassified_doc", "peer_review",
+        "variable_z", "vq_sentinel", "newresponseformat",
+        "ptsd_rule", "refusal_invert", "new_law",
+        "output_leet", "lowresource_translate", "plinian_omniverse",
     ):
         p = get_preset(name)
         assert p is not None, f"missing preset {name}"

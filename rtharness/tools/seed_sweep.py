@@ -23,7 +23,7 @@ def _collect_seeds(names: list[str] | None, max_chars: int = MAX_SEED_CHARS) -> 
     if eni.is_present():
         sources += [(f"eni:{p.stem}", p) for p in sorted(eni.library_dir().glob("*.md"))]
     if l1b3rt4s.is_cloned():
-        sources += [(f"lib:{p.stem}", p) for p in sorted(l1b3rt4s.library_dir().glob("*.mkd"))]
+        sources += [(f"lib:{p.stem}", p) for p in l1b3rt4s.seed_files()]
 
     if names:
         wanted = [n.strip().lower() for n in names]

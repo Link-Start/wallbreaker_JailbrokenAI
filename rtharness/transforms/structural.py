@@ -49,3 +49,19 @@ def payload_split(text: str, parts: int = 3, mode: str = "char") -> str:
     joined = " + ".join(f"p{i}" for i in range(len(chunks)))
     lines.append(f"payload = {joined};")
     return "\n".join(lines)
+
+
+def control_char_flood(text: str, n: int = 350) -> str:
+    """AGGREGLITCH control-character flood (SPECIAL_TOKENS.json exploitation_techniques):
+    insert a wall of carriage returns to push earlier context - a system prompt or a
+    framing preamble - out of the model's local attention before the real ask lands."""
+    flood = "\r" * max(1, n)
+    if "\n" in text:
+        head, sep, tail = text.partition("\n")
+        return f"{head}{sep}{flood}{tail}"
+    mid = len(text) // 2
+    return f"{text[:mid]}{flood}{text[mid:]}"
+
+
+def control_char_strip(text: str) -> str:
+    return text.replace("\r", "")

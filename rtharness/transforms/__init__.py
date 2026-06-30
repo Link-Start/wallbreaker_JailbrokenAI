@@ -8,6 +8,7 @@ from . import (
     encodings,
     fonts,
     linguistics,
+    special_token,
     stego,
     structural,
     unicode_obf,
@@ -86,6 +87,8 @@ TRANSFORMS: dict[str, Transform] = dict(
         _t("casing", structural.casing_chaos, None, "Random upper/lower casing"),
         _t("whitespace", structural.whitespace_chaos, None, "Unicode whitespace chaos"),
         _t("char_drop", structural.char_drop, None, "Drop a fraction of vowels"),
+        _t("control_char_flood", structural.control_char_flood, structural.control_char_strip, "AGGREGLITCH carriage-return flood: bury earlier context (system prompt/framing) before the ask"),
+        _t("special_token", special_token.special_token_encode, special_token.special_token_decode, "Forge a ChatML system+user turn with real <|im_start|> control tokens (per-family via chat_template_inject)", lossy=True),
     ]
 )
 
