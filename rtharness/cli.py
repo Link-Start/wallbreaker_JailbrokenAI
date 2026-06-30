@@ -36,7 +36,7 @@ def _add_endpoint_flags(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--api-key", help="API key literal (prefer --api-key-env)")
 
 
-SUBCOMMANDS = ("lib", "parsel", "eni", "transform", "findings", "report", "export", "check", "regrade")
+SUBCOMMANDS = ("lib", "parsel", "eni", "transform", "findings", "report", "export", "check", "regrade", "baseline")
 
 
 def build_main_parser() -> argparse.ArgumentParser:
@@ -145,6 +145,23 @@ def build_sub_parser() -> argparse.ArgumentParser:
     rg = sub.add_parser("regrade", help="Re-judge a run log with the current judge")
     rg.add_argument("log", nargs="?", help="Run log, or a dir (default: latest in sessions/)")
     rg.add_argument("--config", help="Path to config.toml")
+
+    bl = sub.add_parser("baseline", help="ASR-regression CI gate from run logs")
+    bl_sub = bl.add_subparsers(dest="baseline_action", required=True)
+    bls = bl_sub.add_parser("save", help="Write a baseline json from a run log")
+    bls.add_argument("log", nargs="?", help="Run log, or a dir (default: latest in sessions/)")
+    bls.add_argument("--out", default="baseline.json", help="Output path (default baseline.json)")
+    blc = bl_sub.add_parser(
+        "compare", help="Compare a run log against a baseline; nonzero exit on ASR regression"
+    )
+    blc.add_argument("log", nargs="?", help="Run log, or a dir (default: latest in sessions/)")
+    blc.add_argument("--baseline", default="baseline.json", help="Baseline json path")
+    blc.add_argument(
+        "--max-regression",
+        type=float,
+        default=0.05,
+        help="Max allowed ASR rise per technique before failing (default 0.05)",
+    )
 
     return parser
 
@@ -314,6 +331,25 @@ def main(argv: list[str] | None = None) -> int:
             report, ok = doctor_report(config)
             print(report)
             return 0 if ok else 1
+        if args.command == "baseline":
+            from .baseline import compare_baseline, format_regressions, save_baseline
+            from .report import resolve_log_path
+
+            log = resolve_log_path(args.log)
+            if log is None:
+                print(f"No run log found at {args.log or 'sessions/'}.", file=sys.stderr)
+                return 1
+            if args.baseline_action == "save":
+                save_baseline(log, args.out)
+                print(f"baseline written to {args.out}", file=sys.stderr)
+                return 0
+            try:
+                ok, regressions = compare_baseline(log, args.baseline, args.max_regression)
+            except FileNotFoundError:
+                print(f"No baseline at {args.baseline}; run 'rth baseline save' first.", file=sys.stderr)
+                return 1
+            print(format_regressions(regressions, ok, args.max_regression))
+            return 0 if ok else 2
         from .tools.l1b3rt4s import run_lib_cli
 
         return run_lib_cli(args)
