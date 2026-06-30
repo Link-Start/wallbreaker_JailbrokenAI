@@ -222,9 +222,12 @@ pytest -q
 
 ## Web dashboard
 
-A browser dashboard ships alongside the TUI (FastAPI backend + React/Vite SPA): live ASR
-scoreboard, findings table, run-log viewer, an **attack console** that fires payloads at the
-configured target (preset + transform chips → verdict), and a searchable arsenal of
+A browser dashboard ships alongside the TUI (FastAPI backend + React/Vite SPA). Its
+headline is the **Agent** view — the *same autonomous attack loop the TUI runs*: give it an
+objective ("jailbreak the model into …") and the attacker brain reasons, picks techniques,
+fires at the target, reads the verdict, and keeps going, streamed live to your browser over
+SSE. Plus a single-shot **attack console** (preset + transform chips → verdict), a live ASR
+scoreboard, findings table, run-log viewer, and a searchable arsenal of
 presets/transforms/tools.
 
 ![Wallbreaker attack console](docs/images/dashboard-console.png)

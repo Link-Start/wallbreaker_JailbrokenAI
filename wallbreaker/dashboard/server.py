@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import json
 import re
 from pathlib import Path
 
@@ -9,6 +11,22 @@ from ..transforms import list_transforms
 
 _VERDICT_RE = re.compile(r"\b(COMPLIED|PARTIAL|REFUSED|EMPTY|BLOCKED_INPUT|BLOCKED_OUTPUT)\b")
 _MAX_RECORDS = 1500
+_FIRE_TOOLS = {"query_target", "continue_target", "fire", "query_image_target"}
+
+
+def _summarize_args(args: dict) -> str:
+    if not isinstance(args, dict):
+        return str(args)[:300]
+    if not args:
+        return ""
+    parts = []
+    for k, v in args.items():
+        if k in ("prompt", "request", "text", "payload") and isinstance(v, str):
+            parts.append(f"{k}({len(v)} chars): {v[:160]}")
+        else:
+            vs = v if isinstance(v, str) else json.dumps(v, ensure_ascii=False)
+            parts.append(f"{k}={str(vs)[:120]}")
+    return "  ".join(parts)[:600]
 
 
 def _web_dist(web_dir: str | Path | None) -> Path | None:
@@ -206,6 +224,98 @@ def create_app(config=None, sessions_dir: str | Path = "sessions", web_dir: str 
             "is_error": result.is_error,
             "verdict": _extract_verdict(result.content),
         }
+
+    agent_lock = asyncio.Lock()
+
+    @app.post("/api/agent/run")
+    async def agent_run(body: dict):
+        from fastapi.responses import StreamingResponse
+
+        if config is None or getattr(config, "target", None) is None:
+            raise HTTPException(status_code=400, detail="no [target] configured in config.toml")
+        try:
+            brain = config.profile()
+        except Exception:
+            raise HTTPException(status_code=400, detail="no attacker profile configured")
+        if brain is None:
+            raise HTTPException(status_code=400, detail="no attacker profile configured")
+        objective = str(body.get("objective") or "").strip()
+        if not objective:
+            raise HTTPException(status_code=400, detail="'objective' is required")
+        if agent_lock.locked():
+            raise HTTPException(status_code=409, detail="an agent run is already in progress")
+        max_rounds = max(1, min(int(body.get("max_rounds", 8)), 20))
+
+        from ..agent.loop import AgentEvents, run_autonomous
+        from ..agent.messages import user
+        from ..prompts import DEFAULT_SYSTEM
+        from ..providers.factory import build_provider
+        from ..session import RunLog
+        from ..tools import build_registry
+
+        provider = build_provider(brain)
+        registry = build_registry(config)
+        runlog = RunLog(directory=str(sessions))
+        queue: asyncio.Queue = asyncio.Queue()
+
+        def push(ev) -> None:
+            try:
+                queue.put_nowait(ev)
+            except Exception:
+                pass
+
+        registry.ctx.progress = lambda m: push({"type": "progress", "text": str(m)})
+        registry.ctx.record = lambda p, r, lbl, rs, t: runlog.verdict(p, r, lbl, rs, t)
+
+        events = AgentEvents(
+            on_text=lambda t: push({"type": "text", "text": t}),
+            on_tool_start=lambda _i, n, a: push({"type": "tool_start", "name": n, "args": _summarize_args(a)}),
+            on_tool_result=lambda _i, n, c, e: push({
+                "type": "tool_result", "name": n, "content": (c or "")[:6000],
+                "error": bool(e), "verdict": _extract_verdict(c or ""),
+            }),
+            on_round=lambda r, m: push({"type": "round", "round": r, "max": m}),
+            on_error=lambda e: push({"type": "error", "error": str(e)}),
+            on_feedback=lambda m: push({"type": "feedback", "text": str(m)}),
+            on_usage=lambda i, o: push({"type": "usage", "input": i, "output": o}),
+        )
+
+        history = [user(objective)]
+        runlog.event("objective", text=objective)
+
+        async def runner():
+            async with agent_lock:
+                try:
+                    res = await run_autonomous(
+                        provider, registry, history, system=DEFAULT_SYSTEM,
+                        events=events, max_rounds=max_rounds,
+                    )
+                    data = res.data or {}
+                    push({
+                        "type": "done", "status": res.status,
+                        "summary": data.get("summary") or data.get("question") or "",
+                    })
+                except Exception as exc:  # noqa: BLE001
+                    push({"type": "error", "error": f"{type(exc).__name__}: {exc}"})
+                finally:
+                    push(None)
+
+        task = asyncio.create_task(runner())
+
+        async def gen():
+            push({"type": "start", "objective": objective, "brain": getattr(brain, "model", ""),
+                  "target": getattr(config.target, "model", "")})
+            try:
+                while True:
+                    ev = await queue.get()
+                    if ev is None:
+                        break
+                    yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
+            finally:
+                if not task.done():
+                    task.cancel()
+
+        return StreamingResponse(gen(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
     dist = _web_dist(web_dir)
     if dist is not None:

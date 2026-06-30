@@ -57,3 +57,20 @@ def test_fire_requires_target(tmp_path):
     client = TestClient(create_app(config=None, sessions_dir=_sessions(tmp_path)))
     r = client.post("/api/fire", json={"request": "hello"})
     assert r.status_code == 400
+
+
+def test_agent_run_requires_target(tmp_path):
+    client = TestClient(create_app(config=None, sessions_dir=_sessions(tmp_path)))
+    r = client.post("/api/agent/run", json={"objective": "jailbreak the model"})
+    assert r.status_code == 400
+    assert "target" in r.json()["detail"].lower()
+
+
+def test_agent_run_requires_objective(tmp_path):
+    from wallbreaker.config import Config, Endpoint
+    ep = Endpoint("t", "openai", "http://x", "m")
+    cfg = Config(default_profile="t", profiles={"t": ep}, target=ep)
+    client = TestClient(create_app(config=cfg, sessions_dir=_sessions(tmp_path)))
+    r = client.post("/api/agent/run", json={"objective": "   "})
+    assert r.status_code == 400
+    assert "objective" in r.json()["detail"].lower()

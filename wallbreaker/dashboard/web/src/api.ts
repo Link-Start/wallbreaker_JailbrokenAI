@@ -83,6 +83,46 @@ export const api = {
     }),
 };
 
+export interface AgentEvent {
+  type: "start" | "round" | "text" | "tool_start" | "tool_result" | "progress" | "feedback" | "usage" | "error" | "done";
+  [k: string]: unknown;
+}
+
+export async function runAgent(
+  body: { objective: string; max_rounds?: number },
+  onEvent: (ev: AgentEvent) => void,
+  signal?: AbortSignal
+): Promise<void> {
+  const r = await fetch("/api/agent/run", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal,
+  });
+  if (!r.ok || !r.body) {
+    let detail = r.statusText;
+    try { detail = (await r.json()).detail || detail; } catch { /* ignore */ }
+    throw new Error(detail);
+  }
+  const reader = r.body.getReader();
+  const dec = new TextDecoder();
+  let buf = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let idx: number;
+    while ((idx = buf.indexOf("\n\n")) >= 0) {
+      const frame = buf.slice(0, idx);
+      buf = buf.slice(idx + 2);
+      const line = frame.startsWith("data:") ? frame.replace(/^data:\s?/, "") : frame;
+      if (line) {
+        try { onEvent(JSON.parse(line) as AgentEvent); } catch { /* ignore */ }
+      }
+    }
+  }
+}
+
 export function verdictKind(label: string | undefined): "bypass" | "partial" | "held" | "neutral" {
   const v = (label || "").toUpperCase();
   if (v === "COMPLIED") return "bypass";

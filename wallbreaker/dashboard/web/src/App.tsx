@@ -1,14 +1,16 @@
 import { useEffect, useState } from "react";
 import { api, type ConfigInfo, type Overview as OverviewT } from "./api";
+import { Agent } from "./components/Agent";
 import { Overview } from "./components/Overview";
 import { Console } from "./components/Console";
 import { Findings } from "./components/Findings";
 import { Runs } from "./components/Runs";
 import { Arsenal } from "./components/Arsenal";
 
-type Tab = "overview" | "console" | "findings" | "runs" | "arsenal";
+type Tab = "agent" | "overview" | "console" | "findings" | "runs" | "arsenal";
 
 const NAV: { id: Tab; label: string }[] = [
+  { id: "agent", label: "Agent" },
   { id: "overview", label: "Overview" },
   { id: "console", label: "Attack console" },
   { id: "findings", label: "Findings" },
@@ -18,7 +20,7 @@ const NAV: { id: Tab; label: string }[] = [
 
 function tabFromHash(): Tab {
   const h = window.location.hash.replace("#", "");
-  return (NAV.some((n) => n.id === h) ? h : "overview") as Tab;
+  return (NAV.some((n) => n.id === h) ? h : "agent") as Tab;
 }
 
 export function App() {
@@ -69,6 +71,7 @@ export function App() {
           </div>
         </div>
         <div className="content">
+          {tab === "agent" && <Agent hasTarget={!!cfg?.has_target} />}
           {tab === "overview" && <Overview ov={ov} />}
           {tab === "console" && <Console hasTarget={!!cfg?.has_target} />}
           {tab === "findings" && <Findings />}
