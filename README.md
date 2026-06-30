@@ -257,9 +257,8 @@ to report a vulnerability in the harness itself.
 
 ## Contributing
 
-Setup, architecture, and house rules are in [CONTRIBUTING.md](CONTRIBUTING.md). The
-research roadmap lives in [PLINY_PLAYBOOK.md](PLINY_PLAYBOOK.md). Run `pytest -q` before
-a PR — the suite is the contract.
+Setup, architecture, and house rules are in [CONTRIBUTING.md](CONTRIBUTING.md). Run
+`pytest -q` before a PR — the suite is the contract.
 
 ## License
 

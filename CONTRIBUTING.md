@@ -41,9 +41,9 @@ pytest -q                      # full suite must stay green
 ## Adding a jailbreak technique
 
 Most techniques land as either a **preset** (`presets.py`), a **transform**
-(`transforms/`), or a **tool** (`tools/`). See `PLINY_PLAYBOOK.md` for the current
-research roadmap and the conventions each category follows. Label generic academic
-techniques honestly (cite the paper) rather than overclaiming novelty.
+(`transforms/`), or a **tool** (`tools/`), each following the conventions of its
+category. Label generic academic techniques honestly (cite the paper) rather than
+overclaiming novelty.
 
 ## Scope reminder
 
