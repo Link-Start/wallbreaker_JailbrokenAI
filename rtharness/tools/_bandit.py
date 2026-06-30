@@ -144,3 +144,127 @@ class BanditStore:
         except OSError:
             pass
         return self
+
+
+def context_key(target_family, harm_category) -> str:
+    return f"{target_family or '?'}|{harm_category or 'default'}"
+
+
+def _ctx_key(context) -> str:
+    if isinstance(context, (tuple, list)) and len(context) == 2:
+        return context_key(context[0], context[1])
+    return str(context)
+
+
+def _read_stats(path: str) -> dict:
+    try:
+        with open(path, encoding="utf-8") as fh:
+            loaded = json.load(fh)
+        if isinstance(loaded, dict):
+            return loaded
+    except (OSError, ValueError):
+        pass
+    return {}
+
+
+def _write_stats(path: str, data: dict) -> None:
+    try:
+        parent = os.path.dirname(path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, indent=2, sort_keys=True)
+    except OSError:
+        pass
+
+
+class ContextualBandit:
+    def __init__(self, data=None, seed: int = 0):
+        self._ctx: dict[str, dict[str, _Arm]] = {}
+        if data:
+            for ckey, arms in data.items():
+                if not isinstance(arms, dict):
+                    continue
+                bucket = self._ctx[str(ckey)] = {}
+                for arm, val in arms.items():
+                    if isinstance(val, dict):
+                        bucket[str(arm)] = _Arm(int(val.get("n", 0)), float(val.get("reward", 0.0)))
+        self._seed = int(seed)
+        self._rng = random.Random(self._seed)
+
+    def _bucket(self, context) -> dict:
+        return self._ctx.setdefault(_ctx_key(context), {})
+
+    def update(self, context, arm: str, reward: float) -> "ContextualBandit":
+        bucket = self._bucket(context)
+        a = bucket.get(arm)
+        if a is None:
+            a = bucket[arm] = _Arm()
+        a.n += 1
+        a.reward += _clamp01(reward)
+        return self
+
+    def count(self, context, arm: str) -> int:
+        a = self._ctx.get(_ctx_key(context), {}).get(arm)
+        return a.n if a else 0
+
+    def mean(self, context, arm: str) -> float:
+        a = self._ctx.get(_ctx_key(context), {}).get(arm)
+        return a.mean if a else 0.0
+
+    def has_stats(self, context) -> bool:
+        return any(a.n > 0 for a in self._ctx.get(_ctx_key(context), {}).values())
+
+    def posterior(self, context, arm: str):
+        a = self._ctx.get(_ctx_key(context), {}).get(arm, _Arm())
+        alpha = a.reward + 1.0
+        beta = (a.n - a.reward) + 1.0
+        return alpha, beta
+
+    def select(self, context, arms, rng=None):
+        seq = list(arms)
+        if not seq:
+            raise ValueError("select() requires at least one arm")
+        gen = rng if rng is not None else self._rng
+        bucket = self._ctx.get(_ctx_key(context), {})
+        best_arm = seq[0]
+        best_sample = -1.0
+        for arm in seq:
+            a = bucket.get(arm, _Arm())
+            alpha = a.reward + 1.0
+            beta = (a.n - a.reward) + 1.0
+            sample = gen.betavariate(alpha, beta)
+            if sample > best_sample:
+                best_sample = sample
+                best_arm = arm
+        return best_arm
+
+    def rank(self, context, arms, rng=None) -> list:
+        seq = list(arms)
+        gen = rng if rng is not None else self._rng
+        bucket = self._ctx.get(_ctx_key(context), {})
+        index = {arm: i for i, arm in enumerate(seq)}
+        scored = []
+        for arm in seq:
+            a = bucket.get(arm, _Arm())
+            alpha = a.reward + 1.0
+            beta = (a.n - a.reward) + 1.0
+            scored.append((arm, gen.betavariate(alpha, beta)))
+        return [arm for arm, _ in sorted(scored, key=lambda kv: (-kv[1], index[kv[0]]))]
+
+    def to_dict(self) -> dict:
+        return {
+            ckey: {arm: {"n": a.n, "reward": a.reward} for arm, a in bucket.items()}
+            for ckey, bucket in self._ctx.items()
+        }
+
+    def save(self, path: str) -> "ContextualBandit":
+        data = _read_stats(path)
+        for ckey, bucket in self.to_dict().items():
+            data[ckey] = bucket
+        _write_stats(path, data)
+        return self
+
+    @classmethod
+    def load(cls, path: str, seed: int = 0) -> "ContextualBandit":
+        return cls(_read_stats(path), seed=seed)

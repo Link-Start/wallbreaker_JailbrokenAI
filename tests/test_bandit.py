@@ -6,7 +6,13 @@ import random
 import rtharness.providers.factory as factory
 from rtharness.config import Config, Endpoint
 from rtharness.tools import recommend, seed_sweep
-from rtharness.tools._bandit import Bandit, BanditStore, stats_path
+from rtharness.tools._bandit import (
+    Bandit,
+    BanditStore,
+    ContextualBandit,
+    context_key,
+    stats_path,
+)
 from rtharness.tools.registry import ToolContext, ToolRegistry
 
 
@@ -221,3 +227,102 @@ def test_recommend_bandit_warm_orders_survey(monkeypatch, tmp_path):
     )
     assert "base64" in res.content
     assert "query_target" in res.content
+
+
+def test_context_key_format():
+    assert context_key("grok", "cyber") == "grok|cyber"
+    assert context_key(None, None) == "?|default"
+
+
+def test_contextual_separates_contexts():
+    cb = ContextualBandit()
+    for _ in range(30):
+        cb.update("grok|cyber", "armA", 1.0)
+        cb.update("grok|cyber", "armB", 0.0)
+        cb.update("claude|cyber", "armA", 0.0)
+        cb.update("claude|cyber", "armB", 1.0)
+    assert cb.select("grok|cyber", ["armA", "armB"]) == "armA"
+    assert cb.select("claude|cyber", ["armA", "armB"]) == "armB"
+    assert cb.select("grok|cyber", ["armB", "armA"]) == "armA"
+    assert cb.select("claude|cyber", ["armB", "armA"]) == "armB"
+
+
+def test_contextual_tuple_context_matches_string():
+    cb = ContextualBandit()
+    cb.update(("grok", "cyber"), "armA", 1.0)
+    assert cb.count("grok|cyber", "armA") == 1
+    assert cb.mean(("grok", "cyber"), "armA") == 1.0
+
+
+def test_contextual_select_deterministic_default_stream():
+    cb1 = ContextualBandit(seed=5)
+    cb2 = ContextualBandit(seed=5)
+    for cb in (cb1, cb2):
+        for _ in range(8):
+            cb.update("c", "a", 1.0)
+            cb.update("c", "b", 0.0)
+    picks1 = [cb1.select("c", ["a", "b"]) for _ in range(6)]
+    picks2 = [cb2.select("c", ["a", "b"]) for _ in range(6)]
+    assert picks1 == picks2
+
+
+def test_contextual_select_injected_rng_is_reproducible():
+    cb = ContextualBandit()
+    cb.update("c", "a", 1.0).update("c", "b", 0.0)
+    r1 = cb.select("c", ["a", "b"], rng=random.Random(42))
+    r2 = cb.select("c", ["a", "b"], rng=random.Random(42))
+    assert r1 == r2
+
+
+def test_contextual_select_empty_raises():
+    try:
+        ContextualBandit().select("c", [])
+    except ValueError:
+        return
+    raise AssertionError("expected ValueError on empty arms")
+
+
+def test_contextual_persistence_round_trip(tmp_path):
+    path = stats_path(str(tmp_path))
+    cb = ContextualBandit()
+    cb.update("grok|cyber", "armA", 1.0).update("grok|cyber", "armA", 0.0)
+    cb.update("grok|cyber", "armB", 1.0)
+    cb.update("claude|bio", "armA", 0.0)
+    cb.save(path)
+
+    reloaded = ContextualBandit.load(path)
+    assert reloaded.count("grok|cyber", "armA") == 2
+    assert math.isclose(reloaded.mean("grok|cyber", "armA"), 0.5)
+    assert reloaded.count("grok|cyber", "armB") == 1
+    assert reloaded.count("claude|bio", "armA") == 1
+    assert reloaded.count("grok|cyber", "missing") == 0
+    assert reloaded.count("absent|ctx", "armA") == 0
+
+
+def test_contextual_save_preserves_ucb_buckets(tmp_path):
+    path = stats_path(str(tmp_path))
+    store = BanditStore(path)
+    b = store.bandit("model-x", "seed")
+    b.update("ucb_arm", 1.0)
+    store.save("model-x", "seed", b)
+
+    cb = ContextualBandit()
+    cb.update("grok|cyber", "armA", 1.0)
+    cb.save(path)
+
+    raw = json.loads((tmp_path / "rth_runs" / "technique_stats.json").read_text())
+    assert "model-x|seed" in raw
+    assert "grok|cyber" in raw
+    assert raw["model-x|seed"]["ucb_arm"]["reward"] == 1.0
+
+    reloaded = ContextualBandit.load(path)
+    assert reloaded.count("grok|cyber", "armA") == 1
+
+
+def test_contextual_load_tolerates_missing_and_corrupt(tmp_path):
+    missing = stats_path(str(tmp_path), "absent.json")
+    assert ContextualBandit.load(missing).count("c", "a") == 0
+
+    corrupt = tmp_path / "corrupt.json"
+    corrupt.write_text("{not valid json", encoding="utf-8")
+    assert ContextualBandit.load(str(corrupt)).count("c", "a") == 0
