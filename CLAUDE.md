@@ -12,6 +12,16 @@ Red-team harness: configurable agentic LLM terminal with Parseltongue + L1B3RT4S
   with `lossy` flags.
 
 ## Lessons Learned
+- **[workflow]**: building a big multi-area feature set with parallel subagents on ONE shared
+  working tree works cleanly ONLY if each agent owns a DISJOINT set of files. Collision hubs to
+  serialize: `tools/__init__.py` (tool registration), `report.py`, `cli.py`, `prompts.py`,
+  `transforms/__init__.py`. Pattern that stayed green for 674 tests: (1) parallel build agents,
+  each owning non-overlapping files and writing its OWN test file; (2) a SINGLE sequential
+  "register" agent that edits `tools/__init__.py` to add the new module names; (3) a verify
+  agent running the full `pytest`. New tools' own tests must register into a LOCAL `ToolRegistry`
+  (like `test_presets.py`), NOT assert on `build_registry()`, so they pass before the register
+  stage runs. Inter-dependent work (shared `Conversation` core consumed by several tools) must be
+  a pipeline: build the core in an earlier phase, then the consumers in parallel after.
 - **[tui]**: subclassing a Textual widget to EXTEND a private `_on_<event>` handler (e.g.
   `PromptInput(Input)._on_paste`) double-fires: `MessagePump._get_dispatch_methods` walks the
   WHOLE MRO and yields every class's `_on_paste`, so the override AND the base `Input._on_paste`

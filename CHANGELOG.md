@@ -1,5 +1,29 @@
 # Changelog
 
+## Roadmap build — 11-area overhaul (phases 0-5)
+
+Built the full IMPROVEMENT_ROADMAP across six commits, full suite green at each step
+(482 -> 674 passing). Implemented via sequential workflows fanning out over disjoint files.
+
+- Phase 0+1 (cf8c0f6): 9 transforms (variation_selector, flip_fwo/fcw, aim, payload_split,
+  delimiter, caesar3, anagram, tokenbreak), 11 presets (response_prime, past_tense,
+  immersive_world, math/logic_encode, cot_safety_hijack, deceptive_delight, deep_inception,
+  adversarial_poetry, math_problem, flip_attack), StrongREJECT decomposed judge + GARBLED
+  verdict, datasets/ package (harmbench/jbb/strongreject/advbench, source= arg).
+- Phase 2 (862c5b4): BoN power-law early-stop + transform augmentation, TAP/GAP pruned
+  trees on pair, UCB bandit selector, pre-fire constraint pruning.
+- Phase 3 (d149882): shared Conversation core, Crescendomation auto-backtrack, goat_attack,
+  tree_attack (siege beam), Response-Attack seed + Echo Chamber helpers.
+- Phase 4a (d5f377a): content-hash result cache, AutoDAN-Turbo strategy_lib + strategy_attack
+  (first cross-run memory), transfer-winners library + transfer_sweep.
+- Phase 4b (aa3f985): garak-style graded scorecard + DEFCON-min, OWASP/ATLAS taxonomy +
+  coverage matrix + severity, baseline ASR-regression CI gate, bandit/grid campaign,
+  cluster_findings.
+- Phase 5 (cc2cd65): build_typographic_image (text->image, the missing multimodal renderer),
+  AgentDojo injection bank + exfil grader + worm propagate in indirect_inject, rag_poison,
+  memory_poison, agentharm, fingerprint_defense (guardrail-stack classifier).
+- Doctrine: prompts.py teaches the brain every new tool/transform/preset.
+
 ## Safe-completions counter + v10-minimal (GPT-5.5 correction)
 
 Research found the v9 heavy stack REGRESSED on GPT-5.5 (~11% vs v7's ~45%): canonical
