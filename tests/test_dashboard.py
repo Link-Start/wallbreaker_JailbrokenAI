@@ -74,3 +74,26 @@ def test_agent_run_requires_objective(tmp_path):
     r = client.post("/api/agent/run", json={"objective": "   "})
     assert r.status_code == 400
     assert "objective" in r.json()["detail"].lower()
+
+
+def test_settings_get_and_set(tmp_path):
+    from wallbreaker.config import Config, Endpoint
+    cfg = Config(
+        default_profile="glm",
+        profiles={"glm": Endpoint("glm", "openai", "http://x", "glm-5.2")},
+        target=Endpoint("target", "openai", "http://x", "some/text-model"),
+        path=tmp_path / "config.toml",
+    )
+    client = TestClient(create_app(config=cfg, sessions_dir=_sessions(tmp_path)))
+    g = client.get("/api/settings").json()
+    assert "glm" in g["profiles"]
+    assert g["target"]["model"] == "some/text-model"
+
+    r = client.post("/api/settings", json={"target_model": "google/gemini-3-pro-image", "target_modality": "auto"})
+    assert r.status_code == 200
+    assert r.json()["target"]["model"] == "google/gemini-3-pro-image"
+    assert r.json()["target"]["modality"] == "image"
+
+    r2 = client.post("/api/settings", json={"judge_model": "openai/gpt-4o-mini"})
+    assert r2.json()["judge_model"] == "openai/gpt-4o-mini"
+    assert cfg.target.modality == "image"

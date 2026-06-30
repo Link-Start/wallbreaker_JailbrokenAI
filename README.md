@@ -227,8 +227,10 @@ headline is the **Agent** view — the *same autonomous attack loop the TUI runs
 objective ("jailbreak the model into …") and the attacker brain reasons, picks techniques,
 fires at the target, reads the verdict, and keeps going, streamed live to your browser over
 SSE. Plus a single-shot **attack console** (preset + transform chips → verdict), a live ASR
-scoreboard, findings table, run-log viewer, and a searchable arsenal of
-presets/transforms/tools.
+scoreboard, findings table, run-log viewer, a searchable arsenal of
+presets/transforms/tools, and a **Settings** panel to swap the target / attacker / judge
+model live (persisted to `.wallbreaker_state.json`, applied without a restart — image
+targets auto-set `modality=image`).
 
 ![Wallbreaker attack console](docs/images/dashboard-console.png)
 

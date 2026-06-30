@@ -40,6 +40,14 @@ export interface RunSummary {
   hits: number;
 }
 
+export interface Settings {
+  profiles: string[];
+  default_profile: string | null;
+  attacker_model: string | null;
+  target: { model: string; modality: string; base_url: string; protocol: string; provider: string[] } | null;
+  judge_model: string | null;
+}
+
 export interface Preset { name: string; description: string }
 export interface Transform { name: string; description: string; lossy: boolean; reversible: boolean }
 export interface Tool { name: string; description: string }
@@ -69,6 +77,13 @@ async function j<T>(url: string, init?: RequestInit): Promise<T> {
 export const api = {
   overview: () => j<Overview>("/api/overview"),
   config: () => j<ConfigInfo>("/api/config"),
+  settings: () => j<Settings>("/api/settings"),
+  saveSettings: (body: Record<string, unknown>) =>
+    j<Settings>("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
   findings: () => j<Finding[]>("/api/findings"),
   runs: () => j<RunSummary[]>("/api/runs"),
   run: (name: string) => j<{ name: string; total: number; records: Record<string, unknown>[] }>(`/api/runs/${encodeURIComponent(name)}`),

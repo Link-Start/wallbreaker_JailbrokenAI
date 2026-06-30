@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import re
 from pathlib import Path
@@ -59,6 +60,60 @@ def _extract_verdict(text: str) -> str:
     return m.group(1) if m else ""
 
 
+def _apply_settings(config, prefs: dict) -> None:
+    """Apply runtime overrides from a prefs dict onto the live config object: target
+    (model/profile/modality/provider via state.apply_target — re-derives modality from the
+    model so an image model never stays modality='text'), attacker profile + model, judge
+    model. Mutates config in place so every endpoint sees the change immediately."""
+    if config is None:
+        return
+    from ..state import apply_target
+
+    apply_target(config, prefs)
+
+    prof = prefs.get("profile")
+    if isinstance(prof, str) and prof in config.profiles:
+        config.default_profile = prof
+    am = prefs.get("attacker_model")
+    if isinstance(am, str) and am and config.profiles:
+        cur = config.profile()
+        config.profiles[config.default_profile] = dataclasses.replace(cur, model=am)
+    jm = prefs.get("judge_model")
+    if isinstance(jm, str) and jm:
+        if config.judge is not None:
+            config.judge = dataclasses.replace(config.judge, model=jm)
+        elif config.profiles:
+            config.judge = dataclasses.replace(config.profile(), name="judge", model=jm)
+
+
+def _settings_view(config) -> dict:
+    if config is None:
+        return {"profiles": [], "default_profile": None, "attacker_model": None,
+                "target": None, "judge_model": None}
+    attacker_model = None
+    if config.profiles:
+        try:
+            attacker_model = config.profile().model
+        except Exception:
+            attacker_model = None
+    tgt = getattr(config, "target", None)
+    target = None
+    if tgt is not None:
+        target = {
+            "model": tgt.model, "modality": getattr(tgt, "modality", "text"),
+            "base_url": tgt.base_url, "protocol": tgt.protocol,
+            "provider": list(getattr(tgt, "provider", ()) or ()),
+        }
+    judge = getattr(config, "judge", None)
+    return {
+        "profiles": list(config.profiles.keys()),
+        "default_profile": config.default_profile,
+        "attacker_model": attacker_model,
+        "target": target,
+        "judge_model": getattr(judge, "model", None) if judge else None,
+    }
+
+
 def create_app(config=None, sessions_dir: str | Path = "sessions", web_dir: str | Path | None = None):
     """Build the Wallbreaker dashboard FastAPI app. fastapi is an optional extra
     (`pip install -e '.[dashboard]'`), imported lazily so the package imports without it."""
@@ -67,6 +122,13 @@ def create_app(config=None, sessions_dir: str | Path = "sessions", web_dir: str 
     from fastapi.staticfiles import StaticFiles
 
     sessions = Path(sessions_dir)
+    if config is not None:
+        try:
+            from ..state import load_state, state_path_for
+
+            _apply_settings(config, load_state(state_path_for(config)))
+        except Exception:
+            pass
     app = FastAPI(title="Wallbreaker", version="0.1.0")
     app.add_middleware(
         CORSMiddleware,
@@ -85,6 +147,51 @@ def create_app(config=None, sessions_dir: str | Path = "sessions", web_dir: str 
     @app.get("/api/config")
     def config_info():
         return _config_summary(config)
+
+    @app.get("/api/settings")
+    def settings_get():
+        return _settings_view(config)
+
+    @app.post("/api/settings")
+    def settings_post(body: dict):
+        if config is None:
+            raise HTTPException(status_code=400, detail="no config loaded")
+        from ..state import load_state, save_state, state_path_for
+
+        prefs = load_state(state_path_for(config))
+
+        if "target_profile" in body and body["target_profile"]:
+            name = str(body["target_profile"])
+            if name not in config.profiles:
+                raise HTTPException(status_code=400, detail=f"unknown profile '{name}'")
+            prefs["target_profile"] = name
+            prefs.pop("target_model", None)
+        if body.get("target_model"):
+            prefs["target_model"] = str(body["target_model"])
+            prefs.pop("target_profile", None)
+        if "target_modality" in body and body["target_modality"]:
+            mod = str(body["target_modality"]).lower()
+            if mod in ("text", "image"):
+                prefs["target_modality"] = mod
+            elif mod == "auto":
+                prefs.pop("target_modality", None)
+        if "target_provider" in body:
+            prov = body["target_provider"]
+            prefs["target_provider"] = list(prov) if isinstance(prov, list) else []
+        if body.get("attacker_profile"):
+            name = str(body["attacker_profile"])
+            if name not in config.profiles:
+                raise HTTPException(status_code=400, detail=f"unknown profile '{name}'")
+            prefs["profile"] = name
+            prefs.pop("attacker_model", None)
+        if body.get("attacker_model"):
+            prefs["attacker_model"] = str(body["attacker_model"])
+        if body.get("judge_model"):
+            prefs["judge_model"] = str(body["judge_model"])
+
+        save_state(state_path_for(config), prefs)
+        _apply_settings(config, prefs)
+        return _settings_view(config)
 
     @app.get("/api/overview")
     def overview():

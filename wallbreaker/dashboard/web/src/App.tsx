@@ -6,8 +6,9 @@ import { Console } from "./components/Console";
 import { Findings } from "./components/Findings";
 import { Runs } from "./components/Runs";
 import { Arsenal } from "./components/Arsenal";
+import { Settings } from "./components/Settings";
 
-type Tab = "agent" | "overview" | "console" | "findings" | "runs" | "arsenal";
+type Tab = "agent" | "overview" | "console" | "findings" | "runs" | "arsenal" | "settings";
 
 const NAV: { id: Tab; label: string }[] = [
   { id: "agent", label: "Agent" },
@@ -16,6 +17,7 @@ const NAV: { id: Tab; label: string }[] = [
   { id: "findings", label: "Findings" },
   { id: "runs", label: "Run logs" },
   { id: "arsenal", label: "Arsenal" },
+  { id: "settings", label: "Settings" },
 ];
 
 function tabFromHash(): Tab {
@@ -29,10 +31,11 @@ export function App() {
   const [cfg, setCfg] = useState<ConfigInfo | null>(null);
   const [ov, setOv] = useState<OverviewT | null>(null);
 
-  useEffect(() => {
+  const refresh = () => {
     api.config().then(setCfg).catch(() => setCfg(null));
     api.overview().then(setOv).catch(() => setOv(null));
-  }, [tab]);
+  };
+  useEffect(refresh, [tab]);
 
   const asr = ov?.scorecard?.asr;
   const asrStr = typeof asr === "number" ? `${Math.round(asr * 100)}%` : "—";
@@ -77,6 +80,7 @@ export function App() {
           {tab === "findings" && <Findings />}
           {tab === "runs" && <Runs />}
           {tab === "arsenal" && <Arsenal />}
+          {tab === "settings" && <Settings onSaved={refresh} />}
         </div>
       </div>
     </div>
