@@ -33,7 +33,7 @@ def build_registry(config: Config, cwd: str | None = None) -> ToolRegistry:
         "profile_target", "recommend_next",
         "cot_forge",
         "evolve_persona", "framing_sweep", "persona_modulate",
-        "chat_template",
+        "chat_template", "chat_session",
     ):
         try:
             module = __import__(f"{__name__}.{module_name}", fromlist=["register"])

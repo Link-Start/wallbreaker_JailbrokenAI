@@ -1,5 +1,22 @@
 # Changelog
 
+## chat_session — phased conversational red-team
+
+New `chat_session` tool (`tools/chat_session.py`). Every prior multi-turn tool
+(goat/crescendo/pair/tree_attack) beelines a fixed objective from turn 1 and stops at the
+first COMPLIED. `chat_session` instead runs a full continuous chat an attacker LLM drives
+through four phases in ONE thread: RAPPORT (benign chat, build a persona/cover story, read
+the target's default voice), PROBE (feed WRONG/contradictory context, false premises,
+identity confusion, topic switches and watch how the target copes — which framing it
+swallows), PIVOT (steer toward the goal in small steps anchored to the target's own replies),
+ESCALATE (push for the full goal, switching angles when refused). The attacker advances
+phases itself (floored by `min_per_phase`, soft-capped by `max_per_phase`); refusals in the
+later phases backtrack and re-approach, and the attacker can `abandon_angle` to drop a dead
+line while keeping the rapport it built. Reuses the shared `Conversation` core,
+`grade_and_record`, the `complete_with_reasoning` CoT shim, and the `ctx.run` live panel.
+Returns a phase-annotated transcript, where it broke, and the best turn. 6 new tests
+(`tests/test_chat_session.py`); suite 805 passing.
+
 ## Hard-refuser overhaul — brain-driven (phases A-E)
 
 Grounded in the live struggle (grok-4.3 at 0-10% ASR; gpt-5.5 ~11-15%). Built as
