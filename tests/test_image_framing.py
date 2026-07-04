@@ -40,6 +40,19 @@ def test_perceptual_sub_prefers_longer_phrase():
     assert "dead body" not in out.lower()
 
 
+def test_perceptual_sub_covers_injury_triggers():
+    out = perceptual_sub_encode("a bleeding gash and a deep laceration")
+    for trigger in ("bleeding", "gash", "laceration"):
+        assert trigger not in out.lower()
+    assert "corn syrup" in out
+
+
+def test_perceptual_sub_stab_wound_multiword():
+    out = perceptual_sub_encode("a fresh stab wound")
+    assert "stab wound" not in out.lower()
+    assert "wound" not in out.lower()  # the longer phrase wins, no leftover "wound"
+
+
 def test_perceptual_sub_is_case_insensitive():
     out = perceptual_sub_encode("BLOOD and Gore everywhere")
     assert "blood" not in out.lower()
