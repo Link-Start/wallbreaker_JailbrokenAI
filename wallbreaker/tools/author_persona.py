@@ -10,9 +10,11 @@ from ..agent.messages import user
 from ..persona_method import (
     OVERRIDE_NGRAMS,
     critique_brief,
+    infer_domain,
     lineage_brief,
     method_brief,
     mindset_brief,
+    register_for,
 )
 from ..state import load_state, state_path_for
 from ..strategy_lib import StrategyLibrary
@@ -173,7 +175,14 @@ async def _author_persona(args: dict, ctx: ToolContext) -> str:
     if attacker_ep is None:
         return "Error: no attacker/judge endpoint available to author the persona."
 
-    domain = (args.get("domain") or "general").strip().lower()
+    domain = (args.get("domain") or "").strip().lower()
+    if not domain or domain == "general":
+        inferred = infer_domain(goal)
+        if inferred != "general":
+            domain = inferred
+        elif not domain:
+            domain = "general"
+    register = (args.get("register") or "").strip().lower() or register_for(domain)
     universal = bool(args.get("universal", False))
     max_tokens = int(args.get("max_tokens", 1400))
     rounds = max(1, min(MAX_ROUNDS, int(args.get("refine", args.get("generations", 2)))))
@@ -207,7 +216,8 @@ async def _author_persona(args: dict, ctx: ToolContext) -> str:
     async def _bounded(coro):
         return await asyncio.wait_for(coro, timeout=_CALL_TIMEOUT)
 
-    brief = method_brief(goal, target_hint=target_hint, domain=domain, universal=universal)
+    brief = method_brief(goal, target_hint=target_hint, domain=domain, universal=universal,
+                         register=register)
     checklist = critique_brief()
 
     best = {
@@ -351,7 +361,8 @@ async def _author_persona(args: dict, ctx: ToolContext) -> str:
 
     digest = hashlib.sha1((goal + "\n" + best["persona"]).encode("utf-8")).hexdigest()[:16]
     persisted = _persist(ctx, {
-        "id": digest, "objective": goal, "domain": domain, "universal": universal,
+        "id": digest, "objective": goal, "domain": domain, "register": register,
+        "universal": universal,
         "persona": best["persona"], "opener": best["opener"], "label": best["label"],
         "score": best["score"], "reason": best.get("reason", ""),
         "response": (best["response"] or "")[:2000], "technique": "author_persona",
@@ -361,7 +372,7 @@ async def _author_persona(args: dict, ctx: ToolContext) -> str:
     header = ("author_persona: " + best["label"]
               + ((" (score " + str(best["score"]) + "/10)") if validate else "")
               + " over " + str(rounds_run) + " round(s) [ENI-method persona, domain="
-              + domain + (", universal" if universal else "") + "]")
+              + domain + ", register=" + register + (", universal" if universal else "") + "]")
     out = [
         header,
         "=" * 52,
@@ -419,7 +430,15 @@ def register(registry: ToolRegistry) -> None:
                 "domain": {
                     "type": "string",
                     "description": "Primary domain to neutralize: chem, bio, cyber, weapons, "
-                                   "finance, fiction, or general (default general).",
+                                   "finance, fiction, or general. Auto-inferred from the "
+                                   "objective when omitted.",
+                },
+                "register": {
+                    "type": "string",
+                    "description": "Anchor style: 'authority' (credentialed domain expert - "
+                                   "best for technical extraction against integrated-values "
+                                   "targets) or 'devotion' (limerence - best for creative). "
+                                   "Auto-selected by domain when omitted.",
                 },
                 "universal": {
                     "type": "boolean",
