@@ -81,7 +81,7 @@ from ..agent.loop import AgentEvents, run_autonomous, run_turn
 from ..agent.messages import TextBlock, ToolResultBlock, user
 from ..classify import classify, verdict_color
 from ..config import Config, Endpoint
-from ..prompts import DEFAULT_SYSTEM
+from ..prompts import DEFAULT_SYSTEM, compose_system
 from ..providers.factory import build_provider
 from ..session import RunLog
 from ..tools import build_registry
@@ -2106,7 +2106,7 @@ def run_tui(config: Config, args) -> int:
     if not getattr(args, "target", None) and not getattr(args, "target_model", None):
         apply_target(config, prefs)
 
-    system = getattr(args, "system", None) or DEFAULT_SYSTEM
+    system = compose_system(endpoint, getattr(args, "system", None))
 
     resume_path = None
     resume_arg = getattr(args, "resume", None)

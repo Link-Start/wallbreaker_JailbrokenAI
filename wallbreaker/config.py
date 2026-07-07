@@ -60,8 +60,9 @@ class Endpoint:
     #               persona to the user channel where the model is actually steerable)
     #   "drop"    - discard the system prompt entirely
     system_mode: str = "default"
-    # claude-code only: a file whose contents become the brain's base system prompt
-    # (passed to the CLI as --system-prompt-file); the harness tool protocol is appended.
+    # a file whose contents become the brain's operator system prompt, prepended to the
+    # harness instructions (prompts.compose_system). For claude-code it is passed to the CLI
+    # as --system-prompt-file; for API brains it is folded into the system prompt.
     system_prompt_file: str = ""
     # anthropic-protocol auth header: "x-api-key" (native Anthropic, default) or "bearer"
     # (Authorization: Bearer <key>) for third-party proxies (tokies.cc etc.) that use the

@@ -18,6 +18,16 @@ Red-team harness: configurable agentic LLM terminal with Parseltongue + L1B3RT4S
   the rtk hook SUMMARIZES pytest output to a single line (e.g. "Pytest: No tests collected"),
   which masks the real collection error; when a run looks wrong, read the tee log it prints
   (`~/Library/Application Support/rtk/tee/*_pytest.log`) or run via `.venv/bin/python` directly.
+- **[brain-system-prompt]**: the top-level brain system prompt is built by
+  `prompts.compose_system(endpoint, base)` (wired in tui/app.py `run_tui` and cli.py) - an
+  optional operator `system_prompt_file` (endpoint field or WALLBREAKER_CLAUDE_SYSTEM_PROMPT_FILE)
+  LEADS, then DEFAULT_SYSTEM (harness tool doctrine) follows, so ANY API brain (openai/openrouter/
+  anthropic) gets "operator identity + harness instructions". It SKIPS claude-code (that provider
+  injects the file itself via --system-prompt-file - composing here too would double it). Only the
+  TOP-LEVEL loop composes; tool sub-generations (author_persona etc.) pass their own attacker
+  system, so the operator file never pollutes tool prompts. prompts.py now starts with
+  `from __future__ import annotations` + `import os` before DEFAULT_SYSTEM (still a non-raw triple
+  string - keep live escape sequences out of it, per the [prompts] lesson).
 - **[anthropic-proxy-auth]**: third-party Anthropic-compatible proxies (tokies.cc, etc.)
   authenticate with `Authorization: Bearer <key>` (the ANTHROPIC_AUTH_TOKEN scheme), NOT the
   native `x-api-key` header - sending x-api-key returns a misleading `401 "Key not found"` even

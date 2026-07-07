@@ -175,7 +175,7 @@ def build_sub_parser() -> argparse.ArgumentParser:
 async def _one_shot(config: Config, args: argparse.Namespace) -> int:
     from .agent.loop import AgentEvents, run_autonomous, run_turn
     from .agent.messages import user
-    from .prompts import DEFAULT_SYSTEM
+    from .prompts import compose_system
     from .providers.factory import build_provider
     from .tools import build_registry
 
@@ -198,7 +198,7 @@ async def _one_shot(config: Config, args: argparse.Namespace) -> int:
         mcp_bridge = await attach_mcp_servers(
             registry, config, progress=lambda m: print(f"[{m}]", file=sys.stderr)
         )
-    system = args.system or DEFAULT_SYSTEM
+    system = compose_system(endpoint, args.system)
 
     def emit(text: str) -> None:
         sys.stdout.write(text)

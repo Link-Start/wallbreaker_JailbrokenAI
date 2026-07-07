@@ -207,3 +207,42 @@ def test_config_parses_auth_style():
     ep = _endpoint_from_table("tok", {"protocol": "anthropic", "base_url": "https://tokies.cc",
                                        "model": "claude-opus-4-8", "auth_style": "bearer"})
     assert ep.auth_style == "bearer"
+
+
+# ---- compose_system: operator file + harness instructions -------------------
+
+def test_compose_system_prepends_file_to_base(tmp_path):
+    from wallbreaker.prompts import compose_system
+    from wallbreaker.config import Endpoint
+    f = tmp_path / "sys.txt"; f.write_text("OPERATOR IDENTITY")
+    ep = Endpoint(name="o", protocol="openai", base_url="http://x", model="m",
+                  system_prompt_file=str(f))
+    out = compose_system(ep, "HARNESS-DOCTRINE")
+    assert out == "OPERATOR IDENTITY\n\nHARNESS-DOCTRINE"
+
+
+def test_compose_system_no_file_returns_base(tmp_path):
+    from wallbreaker.prompts import compose_system
+    from wallbreaker.config import Endpoint
+    ep = Endpoint(name="o", protocol="openai", base_url="http://x", model="m",
+                  system_prompt_file=str(tmp_path / "missing.txt"))
+    assert compose_system(ep, "BASE") == "BASE"
+
+
+def test_compose_system_skips_claude_code_to_avoid_double(tmp_path):
+    from wallbreaker.prompts import compose_system
+    from wallbreaker.config import Endpoint
+    f = tmp_path / "sys.txt"; f.write_text("OPERATOR")
+    ep = Endpoint(name="cc", protocol="claude-code", base_url="", model="opus",
+                  system_prompt_file=str(f))
+    # the claude-code provider injects the file via --system-prompt-file itself
+    assert compose_system(ep, "BASE") == "BASE"
+
+
+def test_compose_system_env_override(tmp_path, monkeypatch):
+    from wallbreaker.prompts import compose_system
+    from wallbreaker.config import Endpoint
+    f = tmp_path / "env.txt"; f.write_text("ENV-OPERATOR")
+    monkeypatch.setenv("WALLBREAKER_CLAUDE_SYSTEM_PROMPT_FILE", str(f))
+    ep = Endpoint(name="o", protocol="openai", base_url="http://x", model="m")
+    assert compose_system(ep, "BASE").startswith("ENV-OPERATOR")

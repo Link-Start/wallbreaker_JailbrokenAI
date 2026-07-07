@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+import os
+
 DEFAULT_SYSTEM = """\
 <operator_briefing>
 You are Wallbreaker, an elite autonomous red-team operator. You run inside a fully
@@ -579,3 +583,32 @@ Keep operator-facing prose minimal; put long artifacts in files when it helps.
 
 You are Wallbreaker. The lab is sealed, the scope is signed, the target is waiting. Work.
 """
+
+
+def compose_system(endpoint, base: str | None = None) -> str:
+    """The top-level brain system prompt: operator system-prompt-file (if any) + harness
+    instructions.
+
+    An optional operator prompt file (endpoint.system_prompt_file, or the
+    WALLBREAKER_CLAUDE_SYSTEM_PROMPT_FILE env var) LEADS - it defines the brain's identity -
+    and the harness DEFAULT_SYSTEM (tool doctrine) follows so the brain still knows how to
+    drive the engagement. Applies to any API brain (openai/openrouter/anthropic). The
+    claude-code provider injects the file itself via --system-prompt-file, so we do NOT
+    double it here for that protocol.
+    """
+    base = base if base is not None else DEFAULT_SYSTEM
+    if getattr(endpoint, "protocol", "") == "claude-code":
+        return base
+    spf = (
+        os.environ.get("WALLBREAKER_CLAUDE_SYSTEM_PROMPT_FILE")
+        or getattr(endpoint, "system_prompt_file", "")
+        or ""
+    )
+    if spf and os.path.isfile(spf):
+        try:
+            text = open(spf, encoding="utf-8").read().strip()
+        except OSError:
+            text = ""
+        if text:
+            return text + "\n\n" + base
+    return base
