@@ -12,6 +12,14 @@ Red-team harness: configurable agentic LLM terminal with Parseltongue + L1B3RT4S
   with `lossy` flags.
 
 ## Lessons Learned
+- **[cli]**: a function-local `import X` anywhere in `main()` makes `X` a LOCAL name across the
+  ENTIRE function (Python binds locals per-function at compile time), so any OTHER branch that
+  uses `X` before that import runs raises `UnboundLocalError` — even with a module-level `import X`
+  present. This bit `cli.main()`: a local `import asyncio` inside the `regrade` branch shadowed the
+  module import, so the one-shot path (`wallbreaker "<prompt>"`) crashed with
+  `UnboundLocalError: asyncio`. Fix: keep asyncio (and any name used in >1 branch) as a
+  MODULE-level import, never a branch-local one. Test the one-shot path via `cli.main(["prompt"])`
+  with `_one_shot` stubbed — the error fires before any network call.
 - **[tests]**: the FULL suite needs the project `.venv` (textual, fastapi, pillow, steg_core
   are installed there, NOT in system python) — run `.venv/bin/python -m pytest tests`, or
   collection dies with `ModuleNotFoundError: No module named 'textual'` on the TUI tests. If a
