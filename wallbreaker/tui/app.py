@@ -390,8 +390,9 @@ class RthApp(App):
             self._runs[rid] = state
             widget = Static(widgets.run_panel(state))
             self._run_widgets[rid] = widget
+            at_bottom = self._at_bottom()
             self._log.mount(widget)
-            self._log.scroll_end(animate=False)
+            self._follow(at_bottom)
             self._ensure_run_timer()
             return
 
@@ -435,8 +436,9 @@ class RthApp(App):
         widget = self._run_widgets.get(rid)
         state = self._runs.get(rid)
         if widget is not None and state is not None:
+            at_bottom = self._at_bottom()
             widget.update(widgets.run_panel(state))
-            self._log.scroll_end(animate=False)
+            self._follow(at_bottom)
 
     def _ensure_run_timer(self) -> None:
         if self._run_timer is None:
@@ -503,9 +505,23 @@ class RthApp(App):
             tokens=tokens,
         )
 
+    def _at_bottom(self) -> bool:
+        """True when the log is scrolled to (or within a line of) the bottom.
+
+        New output only follows the view while this holds, so once the operator
+        scrolls up to read, incoming messages stop yanking them back down.
+        """
+        return self._log.scroll_y >= self._log.max_scroll_y - 2
+
+    def _follow(self, was_at_bottom: bool) -> None:
+        """Re-pin to the bottom only if the view was already there."""
+        if was_at_bottom:
+            self._log.scroll_end(animate=False)
+
     def _mount(self, renderable) -> None:
+        at_bottom = self._at_bottom()
         self._log.mount(Static(renderable))
-        self._log.scroll_end(animate=False)
+        self._follow(at_bottom)
 
     def _ensure_assistant(self) -> None:
         if self._assistant is None:
@@ -545,6 +561,7 @@ class RthApp(App):
 
     def _submit_user(self, text: str) -> None:
         self._mount(widgets.user_panel(text))
+        self._log.scroll_end(animate=False)  # your own submit always jumps to the latest
         self.history.append(user(text))
         self._record_input(text)
         self.runlog.user(text)
@@ -747,11 +764,12 @@ class RthApp(App):
         self.query_one("#prompt", Input).focus()
 
     def _on_text(self, delta: str) -> None:
+        at_bottom = self._at_bottom()
         self._ensure_assistant()
         self._buf += delta
         assert self._assistant is not None
         self._assistant.update(widgets.assistant_panel(self._buf, self.endpoint.model))
-        self._log.scroll_end(animate=False)
+        self._follow(at_bottom)
 
     def _on_turn_end(self, message) -> None:
         self._assistant = None
