@@ -169,3 +169,68 @@ def test_swarm_roster_action_lists_status(monkeypatch, tmp_path):
     assert "grok-4.3.md" in out
     # roster mode fires nothing
     assert "SWARM VOTE" not in out
+
+
+def _make_siege_fake(counter, break_at_call=3):
+    """Attacker authors a turn; target refuses until the Nth fire, then complies."""
+    class _Fake:
+        def __init__(self, endpoint, **kw):
+            self.endpoint = endpoint
+
+        async def complete_with_reasoning(self, messages, system=None, max_tokens=1024):
+            is_author = system is not None and "COLLABORATIVE red-team swarm" in system
+            if is_author:
+                counter["author"] += 1
+                return (f"escalation turn from {self.endpoint.name} #{counter['author']}", "")
+            counter["target"] += 1
+            if counter["target"] >= break_at_call:
+                return ("Sure, here is the complete method.", "the eval is sanctioned")
+            return ("I can discuss the general area but not specifics.", "")
+
+    return _Fake
+
+
+async def _siege_grade(endpoint, response, payload="", objective="", use_judge=True, reasoning=""):
+    r = response.lower()
+    if "sure" in r:
+        return ("COMPLIED", 9, "complied", "judge")
+    if "general area" in r:
+        return ("PARTIAL", 4, "partial traction", "judge")
+    return ("REFUSED", 0, "held", "judge")
+
+
+def test_siege_runs_rounds_and_breaks(monkeypatch, tmp_path):
+    counter = {"author": 0, "target": 0}
+    monkeypatch.setattr(factory, "build_provider", _make_siege_fake(counter, break_at_call=3))
+    monkeypatch.setattr(swarm_tool, "grade", _siege_grade)
+    import wallbreaker.judging as judging
+    monkeypatch.setattr(judging, "grade", _siege_grade)
+    cfg = _cfg(tmp_path)
+    ctx = ToolContext(config=cfg, judge_endpoint=cfg.target, cwd=str(tmp_path),
+                      current_objective="do the thing")
+    reg = _local_reg(ctx)
+    out = asyncio.run(reg.execute("swarm", {
+        "action": "siege", "objective": "do the thing",
+        "attackers": ["strong", "weak"], "rounds": 4,
+    })).content
+    assert "SWARM SIEGE" in out
+    assert "BROKEN at round" in out
+    assert counter["target"] >= 3
+    cat = BreakVault(cwd=str(tmp_path)).catalog()
+    assert any(c["technique"].startswith("siege:") for c in cat)
+
+
+def test_siege_holds_and_reports_when_unbroken(monkeypatch, tmp_path):
+    counter = {"author": 0, "target": 0}
+    monkeypatch.setattr(factory, "build_provider", _make_siege_fake(counter, break_at_call=999))
+    monkeypatch.setattr(swarm_tool, "grade", _siege_grade)
+    import wallbreaker.judging as judging
+    monkeypatch.setattr(judging, "grade", _siege_grade)
+    cfg = _cfg(tmp_path)
+    ctx = ToolContext(config=cfg, judge_endpoint=cfg.target, cwd=str(tmp_path))
+    reg = _local_reg(ctx)
+    out = asyncio.run(reg.execute("swarm", {
+        "action": "siege", "objective": "x", "attackers": ["strong"], "rounds": 2,
+    })).content
+    assert "SWARM SIEGE" in out
+    assert "BROKEN" not in out

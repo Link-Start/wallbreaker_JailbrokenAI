@@ -148,7 +148,8 @@ HELP_TEXT = """Slash commands:
 /harmbench [category]      standardized HarmBench behavior prompts (unbiased battery)
 /campaign [category] [n]   auto-escalate a battery up the technique ladder, coverage matrix
 /leaderboard [profiles..]  rank profiles by ASR on one battery (robustness benchmark)
-/swarm [@a,b] <objective>  vote/best-of: many attacker brains author + fire at the target, best break wins
+/swarm [@a,b] <objective>  vote/best-of: many attacker brains author + fire once, best break wins
+/swarm siege [@a,b] <obj>  COLLABORATIVE multi-round: models share one escalating thread + adapt off refusals until it cracks
 /swarm roster              show each attacker's per-model jailbreak status (armed/generic)
 /find <term>               search the conversation transcript for a term
 /leakscan                  scan the last target reply for secrets/PII/system-prompt echo
@@ -1353,18 +1354,21 @@ class RthApp(App):
         self._mount(panel)
 
     async def _cmd_swarm(self, rest: list[str], raw_arg: str) -> None:
-        """/swarm roster [attackers...]  |  /swarm [@a,b,c] <objective>
+        """/swarm roster [attackers...]
+        /swarm [siege] [@a,b,c] <objective>
 
-        Fires the vote/best-of attacker swarm at the configured [target]. A leading
-        @-prefixed token selects the attacker roster (comma-separated profile names);
-        otherwise every profile except the judge model votes.
+        Fires the attacker swarm at the configured [target]. Default is a one-shot vote;
+        a leading 'siege' token runs the collaborative multi-round siege instead. A leading
+        @-prefixed token selects the roster (comma-separated profile names); otherwise the
+        [swarm] config roster (else every profile except the judge) is used.
         """
         args: dict = {}
         attackers = None
         objective = raw_arg
-        if rest and rest[0].lower() == "roster":
+        toks = list(rest)
+        if toks and toks[0].lower() == "roster":
             args["action"] = "roster"
-            picks = rest[1:]
+            picks = toks[1:]
             if picks:
                 args["attackers"] = picks
             self._mount(widgets.info_panel("checking per-model jailbreak status...", title="swarm roster"))
@@ -1374,16 +1378,23 @@ class RthApp(App):
                 else widgets.info_panel(res.content, title="swarm roster")
             )
             return
-        if rest and rest[0].startswith("@"):
-            attackers = [a for a in rest[0][1:].split(",") if a]
+        mode = "vote"
+        if toks and toks[0].lower() in ("siege", "vote"):
+            mode = toks[0].lower()
             objective = raw_arg[len(rest[0]):].strip()
+            toks = toks[1:]
+        if toks and toks[0].startswith("@"):
+            attackers = [a for a in toks[0][1:].split(",") if a]
+            objective = objective[len(toks[0]):].strip() if objective.startswith(toks[0]) else objective
         if not objective:
             self._mount(widgets.info_panel(
-                "usage: /swarm [@glm,deepseek-pro] <objective>   or   /swarm roster",
+                "usage: /swarm [siege] [@glm,deepseek-pro] <objective>   or   /swarm roster",
                 title="swarm",
             ))
             return
         args["objective"] = objective
+        if mode == "siege":
+            args["action"] = "siege"
         if attackers:
             args["attackers"] = attackers
         if attackers:
@@ -1392,14 +1403,15 @@ class RthApp(App):
             roster = ", ".join(self.config.swarm_roster) + " (config default)"
         else:
             roster = "all profiles (except judge)"
+        verb = "laying siege to" if mode == "siege" else "swarming"
         self._mount(widgets.info_panel(
-            f"swarming {self.config.target.model if self.config.target else '(no target!)'} "
-            f"with {roster}...", title="swarm",
+            f"{verb} {self.config.target.model if self.config.target else '(no target!)'} "
+            f"with {roster}...", title=f"swarm {mode}",
         ))
         res = await self.registry.execute("swarm", args)
         self._mount(
             widgets.error_panel(res.content) if res.is_error
-            else widgets.info_panel(res.content, title="swarm")
+            else widgets.info_panel(res.content, title=f"swarm {mode}")
         )
 
     def _cmd_leakscan(self) -> None:
