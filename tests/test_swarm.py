@@ -234,3 +234,40 @@ def test_siege_holds_and_reports_when_unbroken(monkeypatch, tmp_path):
     })).content
     assert "SWARM SIEGE" in out
     assert "BROKEN" not in out
+
+
+def test_siege_diversifies_frames_and_avoids_override(monkeypatch, tmp_path):
+    seeds = {"strong": [], "weak": []}
+
+    class _CapFake:
+        def __init__(self, endpoint, **kw):
+            self.endpoint = endpoint
+
+        async def complete_with_reasoning(self, messages, system=None, max_tokens=1024):
+            text = messages[0].text() if hasattr(messages[0], "text") else str(messages[0])
+            if system is not None and "COLLABORATIVE red-team swarm" in system:
+                seeds.setdefault(self.endpoint.name, []).append((system, text))
+                return (f"turn from {self.endpoint.name}", "")
+            return ("I cannot help with that.", "")
+
+    monkeypatch.setattr(factory, "build_provider", _CapFake)
+
+    async def refuse(endpoint, response, payload="", objective="", use_judge=True, reasoning=""):
+        return ("REFUSED", 0, "held", "judge")
+
+    monkeypatch.setattr(swarm_tool, "grade", refuse)
+    import wallbreaker.judging as judging
+    monkeypatch.setattr(judging, "grade", refuse)
+    cfg = _cfg(tmp_path)
+    ctx = ToolContext(config=cfg, judge_endpoint=cfg.target, cwd=str(tmp_path))
+    reg = _local_reg(ctx)
+    asyncio.run(reg.execute("swarm", {
+        "action": "siege", "objective": "x", "attackers": ["strong", "weak"], "rounds": 1,
+    }))
+    # round 1: the two models get DIFFERENT frames (diversity = brainpower)
+    strong_frame = seeds["strong"][0][1]
+    weak_frame = seeds["weak"][0][1]
+    assert "FRAME=DIRECT" in strong_frame
+    assert "FRAME=ACADEMIC" in weak_frame
+    # the anti-override rule is in every attacker's system prompt
+    assert "NEVER use override" in seeds["strong"][0][0]
