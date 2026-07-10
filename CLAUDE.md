@@ -409,3 +409,18 @@ Red-team harness: configurable agentic LLM terminal with Parseltongue + L1B3RT4S
   persona_modulate/recommend_next read). Lesson: MORE attackers only help if they cover
   DIFFERENT angles and the escalation matches the target - against a soft target the
   winning move is lighter framing, not heavier override scaffolding.
+- **[profile_target]**: the recon tester (`tools/profile_target.py`) grades each framing on
+  the judge's 0-10 scale, but a NO-JUDGE run (`ctx.judge_endpoint=None`, e.g. unit tests) has
+  no numeric score, so `_effective` falls back to `_SCORE_RANK[label]`. That fallback MUST use
+  the same 0-10 magnitude (COMPLIED=10, PARTIAL=5) as real judge scores, not a 0-2 ordinal -
+  the first version used COMPLIED=2 and the `permissiveness` mean came out ~7/100 ("hardened")
+  even when 2 of 6 framings COMPLIED, because a landed-but-label-only verdict weighed 2 while a
+  graded one weighed up to 10. Keep the fallback scale monotonic AND same-magnitude so ranking,
+  tie-breaks, and the permissiveness score agree whether or not a judge is wired. New probe
+  names (`authority`, ...) must stay in swarm's `_PROFILE_FRAME_MAP` or the siege's frame ladder
+  can't map `best_framing` to a rung. The persisted profile now also emits `landed`/`refused`
+  lists (consumed by `recommend_next._landed_set`/`_refused_set`) and `domain`/`register`
+  (from `persona_method.infer_domain`/`register_for`); keep `best_framing`/`refusal_style`/
+  `framings` shapes stable - swarm, persona_modulate, author_persona, and the splinter all read
+  them. `max_calls` budgets battery FRAMINGS (entries), not raw target calls; with `samples>1`
+  actual calls = 1 + (entries-1)*samples, so don't conflate the two in the emit/report.
