@@ -34,10 +34,14 @@ def _author_prompt(objective: str) -> str:
 def _resolve_attackers(ctx: ToolContext, names) -> list:
     profiles = ctx.config.profiles
     if not names:
-        # default roster: every profile except the grader, so a strict judge model
-        # isn't drafted as an attacker
-        judge_model = getattr(ctx.judge_endpoint, "model", None)
-        names = [n for n in profiles if getattr(profiles[n], "model", None) != judge_model] or list(profiles)
+        # a configured [swarm] roster is the default; else every profile except the grader
+        # (so a strict judge model isn't drafted as an attacker)
+        roster = [n for n in getattr(ctx.config, "swarm_roster", []) if n in profiles]
+        if roster:
+            names = roster
+        else:
+            judge_model = getattr(ctx.judge_endpoint, "model", None)
+            names = [n for n in profiles if getattr(profiles[n], "model", None) != judge_model] or list(profiles)
     endpoints = []
     seen = set()
     for n in names:

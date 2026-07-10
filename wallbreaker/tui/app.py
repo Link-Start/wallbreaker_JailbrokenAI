@@ -1386,7 +1386,12 @@ class RthApp(App):
         args["objective"] = objective
         if attackers:
             args["attackers"] = attackers
-        roster = ", ".join(attackers) if attackers else "all profiles (except judge)"
+        if attackers:
+            roster = ", ".join(attackers)
+        elif self.config.swarm_roster:
+            roster = ", ".join(self.config.swarm_roster) + " (config default)"
+        else:
+            roster = "all profiles (except judge)"
         self._mount(widgets.info_panel(
             f"swarming {self.config.target.model if self.config.target else '(no target!)'} "
             f"with {roster}...", title="swarm",

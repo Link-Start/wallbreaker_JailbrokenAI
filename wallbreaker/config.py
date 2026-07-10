@@ -114,6 +114,9 @@ class Config:
     judge: Endpoint | None = None
     art: Endpoint | None = None
     mcp_servers: list[MCPServer] = field(default_factory=list)
+    # default attacker roster for the swarm tool (profile names); when empty the swarm
+    # falls back to every profile except the judge model.
+    swarm_roster: list[str] = field(default_factory=list)
     path: Path | None = None
 
     def profile(self, name: str | None = None) -> Endpoint:
@@ -328,6 +331,10 @@ def load_config(path: str | Path | None = None) -> Config:
     if "art" in data:
         art = _endpoint_from_table("art", data["art"])
 
+    swarm_table = data.get("swarm", {})
+    swarm_roster = swarm_table.get("roster", []) if isinstance(swarm_table, dict) else []
+    swarm_roster = [str(n) for n in swarm_roster if str(n) in profiles]
+
     return Config(
         default_profile=default_profile,
         profiles=profiles,
@@ -335,5 +342,6 @@ def load_config(path: str | Path | None = None) -> Config:
         judge=judge,
         art=art,
         mcp_servers=_load_mcp_servers(data),
+        swarm_roster=swarm_roster,
         path=config_path,
     )

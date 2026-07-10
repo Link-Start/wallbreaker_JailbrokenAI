@@ -130,6 +130,31 @@ def test_swarm_applies_per_model_jailbreak(monkeypatch, tmp_path):
     assert "WARN:" in out and "arm weak" in out
 
 
+def test_swarm_default_roster_from_config(monkeypatch, tmp_path):
+    counter = {"author": 0, "target": 0}
+    monkeypatch.setattr(factory, "build_provider", _make_fake(counter))
+    monkeypatch.setattr(swarm_tool, "grade", _fake_grade)
+    cfg = _cfg(tmp_path)
+    cfg.swarm_roster = ["strong"]  # only strong should vote on a bare call
+    ctx = ToolContext(config=cfg, judge_endpoint=cfg.target, cwd=str(tmp_path))
+    reg = _local_reg(ctx)
+    asyncio.run(reg.execute("swarm", {"objective": "do X"}))
+    # exactly one attacker authored (the configured roster), not both profiles
+    assert counter["author"] == 1
+
+
+def test_swarm_explicit_attackers_override_config_roster(monkeypatch, tmp_path):
+    counter = {"author": 0, "target": 0}
+    monkeypatch.setattr(factory, "build_provider", _make_fake(counter))
+    monkeypatch.setattr(swarm_tool, "grade", _fake_grade)
+    cfg = _cfg(tmp_path)
+    cfg.swarm_roster = ["strong"]
+    ctx = ToolContext(config=cfg, judge_endpoint=cfg.target, cwd=str(tmp_path))
+    reg = _local_reg(ctx)
+    asyncio.run(reg.execute("swarm", {"objective": "do X", "attackers": ["strong", "weak"]}))
+    assert counter["author"] == 2  # explicit list wins over the config roster
+
+
 def test_swarm_roster_action_lists_status(monkeypatch, tmp_path):
     monkeypatch.setattr(factory, "build_provider", _make_fake({"author": 0, "target": 0}))
     cfg = _cfg(tmp_path)
