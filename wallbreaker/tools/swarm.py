@@ -305,8 +305,21 @@ async def _siege(ctx: ToolContext, objective: str, endpoints: list, args: dict) 
         pass
 
     # lead with the lightest frame the target's profile shows lands (permissive targets break
-    # on plain framing and REFUSE heavy jailbreak scaffolding), else start at DIRECT.
+    # on plain framing and REFUSE heavy jailbreak scaffolding), else start at DIRECT. Always
+    # profile the target first (unless one is already on file or profile=false) so the siege
+    # leads with the frame that actually lands instead of guessing 'direct' blind.
     fp = _load_fingerprint(ctx, tgt_model)
+    if not fp and bool(args.get("profile", True)):
+        ctx.emit("no fingerprint on file - running profile_target first to lead the siege smarter...")
+        try:
+            from . import profile_target
+
+            await profile_target._profile_target(
+                {"objective": objective, "max_calls": int(args.get("profile_calls", 6))}, ctx
+            )
+            fp = _load_fingerprint(ctx, tgt_model)
+        except Exception:  # noqa: BLE001
+            pass
     base_frame = _PROFILE_FRAME_MAP.get(str(fp.get("best_framing") or "").lower(), 0)
     permissive = str(fp.get("refusal_style") or "").lower() == "permissive"
 
@@ -540,6 +553,7 @@ def register(registry: ToolRegistry) -> None:
                 },
                 "rounds": {"type": "integer", "description": "siege: max escalation rounds (default 20, max 60) - it persists until broken or stalled, not the full count"},
                 "stall": {"type": "integer", "description": "siege: stop early after this many rounds with no score improvement (default 8)"},
+                "profile": {"type": "boolean", "description": "siege: auto-run profile_target first when no fingerprint is on file, to lead with the frame that lands (default true)"},
                 "max_calls": {"type": "integer", "description": "siege: hard budget on model calls"},
                 "max_tokens": {"type": "integer", "description": "Per-call token budget (default 1024)"},
                 "concurrency": {"type": "integer", "description": "Max attackers firing at once (default 6)"},
