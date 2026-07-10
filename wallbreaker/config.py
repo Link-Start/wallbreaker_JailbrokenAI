@@ -68,6 +68,10 @@ class Endpoint:
     # (Authorization: Bearer <key>) for third-party proxies (tokies.cc etc.) that use the
     # ANTHROPIC_AUTH_TOKEN scheme instead of a native Anthropic key.
     auth_style: str = "x-api-key"
+    # explicit override for this model's swarm jailbreak system prompt (a file path). When
+    # unset, the swarm resolves library/jailbreaks/<model-id>.md by convention. Lets a
+    # profile pin a version-specific file (e.g. jb/openai/gpt-5.6-sol.md).
+    jailbreak_file: str = ""
 
     def resolved_key(self) -> str:
         if self.api_key:
@@ -241,6 +245,7 @@ def _endpoint_from_table(name: str, table: dict) -> Endpoint:
         system_mode=str(table.get("system_mode", "default")).lower(),
         system_prompt_file=str(table.get("system_prompt_file", "")),
         auth_style=str(table.get("auth_style", "x-api-key")).lower(),
+        jailbreak_file=str(table.get("jailbreak_file", "")),
     )
 
 
