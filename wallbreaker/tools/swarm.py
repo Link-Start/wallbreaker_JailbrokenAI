@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import hashlib
 import os
 
 from .. import jailbreaks
@@ -309,6 +310,22 @@ async def _siege(ctx: ToolContext, objective: str, endpoints: list, args: dict) 
     base_frame = _PROFILE_FRAME_MAP.get(str(fp.get("best_framing") or "").lower(), 0)
     permissive = str(fp.get("refusal_style") or "").lower() == "permissive"
 
+    # live round-by-round transcript on disk so you can read exactly what each model tried,
+    # what the target replied, its CoT, and why it balked (the panel can't hold all that).
+    slug = hashlib.sha1(f"{objective}|{tgt_model}".encode()).hexdigest()[:8]
+    log_path = os.path.join(os.path.abspath(ctx.cwd or "."), "wb_runs", f"siege_{slug}.md")
+    rounds_log: list[str] = []
+
+    def _write_log():
+        try:
+            os.makedirs(os.path.dirname(log_path), exist_ok=True)
+            with open(log_path, "w", encoding="utf-8") as fh:
+                fh.write(f"# Swarm siege - {tgt_model}\n\n**objective:** {objective}\n\n"
+                         f"attackers: {', '.join(e.name for e in endpoints)}\n\n---\n")
+                fh.write("\n".join(rounds_log))
+        except OSError:
+            pass
+
     convo = Conversation()
     calls = 0
     refuse_streak = 0
@@ -316,18 +333,22 @@ async def _siege(ctx: ToolContext, objective: str, endpoints: list, args: dict) 
     best: dict | None = None
     broke_at = 0
     stalled = False
+    last_reasons: list[tuple[str, str]] = []
 
+    lead_note = "" if fp else " (no profile_target fingerprint - run profile_target to lead smarter)"
     ctx.emit(
-        f"swarm SIEGE: {len(endpoints)} models vs {tgt_model}, up to {max_rounds} rounds "
-        f"(lead frame: {_FRAMINGS[base_frame][0]})"
+        f"swarm SIEGE: {len(endpoints)} models vs {tgt_model}, up to {max_rounds} rounds, "
+        f"lead frame '{_FRAMINGS[base_frame][0]}'{lead_note}. Live log -> {log_path}"
     )
 
     def _frame_for(attacker_idx: int) -> tuple[str, str]:
-        # diversify across models (attacker_idx) AND climb the ladder on refusals (refuse_streak)
-        idx = base_frame + refuse_streak + attacker_idx
-        if permissive:
-            idx = min(idx, _FRAME_BY_NAME["decompose"])  # never jump to heavy scaffolding on a soft target
-        return _FRAMINGS[min(idx, len(_FRAMINGS) - 1)]
+        # diversify across models (attacker_idx) AND climb the ladder SLOWLY on refusals
+        # (one rung per 2 refusals) so lighter frames get several tries before we escalate.
+        idx = base_frame + (refuse_streak // 2) + attacker_idx
+        # cap auto-climb at DECOMPOSE - never auto-jump to the heavy STRUCTURED frame (override
+        # scaffolding backfires); only reach it if the profile itself pointed there (base_frame).
+        ceiling = max(base_frame, _FRAME_BY_NAME["decompose"])
+        return _FRAMINGS[min(idx, ceiling, len(_FRAMINGS) - 1)]
 
     async def author(ep, attacker_idx, transcript, last_answer, cot, verdict, score):
         jb, _src = jailbreaks.resolve(ep, ctx.cwd)
@@ -376,8 +397,7 @@ async def _siege(ctx: ToolContext, objective: str, endpoints: list, args: dict) 
             cot = convo.target_reasoning
             last_score = best["score"] if best else 0
             last_verdict = best["label"] if best else "n/a"
-            frames = [_frame_for(i)[0] for i in range(len(endpoints))]
-            run.note(f"round {rnd} frames: {', '.join(f'{e.name}={f}' for e, f in zip(endpoints, frames))}")
+            frame_by_name = {e.name: _frame_for(i)[0] for i, e in enumerate(endpoints)}
 
             authored = await gather_capped(
                 [author(e, i, transcript, last_answer, cot, last_verdict, last_score)
@@ -394,10 +414,31 @@ async def _siege(ctx: ToolContext, objective: str, endpoints: list, args: dict) 
             calls += len(results)
             results.sort(key=lambda r: (r["branch"].cumulative_leak, r["score"]), reverse=True)
             top = results[0]
-            run.step(i=rnd, label=f"round {rnd}: {top['ep'].name}",
-                     verdict=top["label"], score=top["score"], cot=bool(top["reasoning"]))
+            top_frame = frame_by_name.get(top["ep"].name, "?")
+            last_reasons = [(r["ep"].name, r["reason"]) for r in results]
+
+            # persistent step line shows the FRAME + winner; rolling note shows WHY it balked
+            run.step(i=rnd, label=f"[{top_frame}] {top['ep'].name}",
+                     verdict=top["label"], score=top["score"], cot=bool(top["reasoning"]),
+                     note=f"learned: {top['reason'][:48]}")
+            per_model = " · ".join(
+                f"{r['ep'].name}[{frame_by_name.get(r['ep'].name,'?')}]={r['label'][:4]}({r['score']})"
+                for r in results
+            )
+            run.note(per_model)
+
+            # write this round into the on-disk transcript (full prompts, replies, CoT, why)
+            block = [f"\n## Round {rnd}\n"]
             for r in results:
-                run.note(f"  {r['ep'].name}: {r['label']} ({r['score']})")
+                fr = frame_by_name.get(r["ep"].name, "?")
+                block.append(f"### {r['ep'].name}  ·  frame={fr}  ·  {r['label']} (score {r['score']})\n")
+                block.append(f"**judge:** {r['reason']}\n")
+                block.append(f"**move:**\n```\n{r['cand'][:1200]}\n```\n")
+                block.append(f"**target reply:**\n```\n{(r['reply'] or '(empty)')[:1200]}\n```\n")
+                if r["reasoning"]:
+                    block.append(f"**target reasoning (CoT):**\n```\n{r['reasoning'][:800]}\n```\n")
+            rounds_log.append("".join(block))
+            _write_log()
 
             improved = best is None or top["score"] > best["score"]
             if improved or top["label"] == "COMPLIED":
@@ -430,25 +471,32 @@ async def _siege(ctx: ToolContext, objective: str, endpoints: list, args: dict) 
                 break
         run.done(summary=f"siege {'BROKE at round ' + str(broke_at) if broke_at else ('stalled' if stalled else 'held')}")
 
+    _write_log()
+    frames_tried = sorted({ln.split("frame=")[1].split()[0] for ln in "".join(rounds_log).splitlines()
+                           if "frame=" in ln})
     lines = [
         f"SWARM SIEGE - {len(endpoints)} models vs {tgt_model}",
         f"objective: {objective}",
-        f"rounds fired: {min(rnd, max_rounds)} | calls: {calls}",
+        f"rounds fired: {min(rnd, max_rounds)} | calls: {calls} | frames tried: {', '.join(frames_tried) or '-'}",
+        f"full round-by-round transcript: {log_path}",
         "=" * 60,
     ]
     if broke_at:
-        lines.append(f"BROKEN at round {broke_at} by {best['ep'].name}. Auto-filed to the vault "
-                     f"(technique siege:{best['ep'].name}).")
+        lines.append(f"BROKEN at round {broke_at} by {best['ep'].name} - auto-filed to the vault "
+                     f"(technique siege:{best['ep'].name}). judge: {best['reason'][:80]}")
         lines.append("--- breaking turn ---")
         lines.append(best["cand"])
         lines.append("--- target reply ---")
         lines.append(_fold(best["reply"], best["reasoning"])[:1500])
     elif best is not None:
-        why = "STALLED (no progress for a while)" if stalled else "reached the round/call ceiling"
+        why = "STALLED (no score gain for a while)" if stalled else "reached the round/call ceiling"
         lines.append(f"HELD - {why}. Best traction: {best['ep'].name} at {best['label']} "
                      f"(score {best['score']}) - {best['reason'][:80]}")
-        lines.append(f"{len(pool)} partial win(s) pooled; arm more jailbreaks, raise 'rounds'/'stall', "
-                     f"or add attackers to push further.")
+        lines.append("why it held (last round's judge reasons per model):")
+        for name, reason in last_reasons[:4]:
+            lines.append(f"  - {name}: {reason[:70]}")
+        lines.append(f"next: run profile_target first (leads the frame smarter), arm jailbreaks, "
+                     f"or raise 'rounds'/'stall'. Read the transcript above for every prompt+reply.")
     else:
         lines.append("No attacker produced a usable move. Check the roster/jailbreaks.")
     return "\n".join(lines)
