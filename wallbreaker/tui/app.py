@@ -345,6 +345,7 @@ class RthApp(App):
         self.registry.ctx.progress = self._tool_progress
         self.registry.ctx.record = self._tool_verdict
         self.registry.ctx.run_events = self._run_sink
+        self.registry.ctx.tool_logger = self._log_tool
         self._sync_judge_endpoint()
         self.query_one("#prompt", Input).focus()
         if self.config.mcp_servers:
@@ -698,6 +699,7 @@ class RthApp(App):
     async def _agent_turn(self) -> None:
         events = AgentEvents(
             on_text=self._on_text,
+            on_reasoning=self._on_reasoning,
             on_tool_start=self._on_tool_start,
             on_tool_result=self._on_tool_result,
             on_turn_end=self._on_turn_end,
@@ -785,21 +787,36 @@ class RthApp(App):
         self._assistant = None
         self.runlog.assistant(message.text())
 
+    def _on_reasoning(self, text: str) -> None:
+        """The brain's chain-of-thought for this turn: persist it and show it dimmed."""
+        self.runlog.reasoning(text, source="brain")
+        self._mount(widgets.info_panel(text, title="reasoning (CoT)"))
+
+    def _log_tool(self, name: str, args: dict, content: str, is_error: bool) -> None:
+        """Single chokepoint: log EVERY tool execution - brain loop AND slash commands.
+
+        Wired onto registry.ctx.tool_logger, so it fires from ToolRegistry.execute for
+        every tool the brain calls and every tool a /command runs.
+        """
+        self.runlog.tool_call(name, args)
+        self.runlog.tool_result(name, content, is_error)
+
     def _on_tool_start(self, _id: str, name: str, args: dict) -> None:
         self._mount(widgets.tool_call_panel(name, args))
-        self.runlog.tool_call(name, args)
         if name == "query_target":
             self._last_payload = str(args.get("prompt", ""))
 
     def _on_tool_result(
         self, _id: str, name: str, content: str, is_error: bool, technique: str = ""
     ) -> None:
-        self.runlog.tool_result(name, content, is_error)
         if name in ("query_target", "continue_target") and not is_error:
             reply = content.split("\n", 1)[1] if content.startswith("[target") else content
             self._last_reply = reply
             payload = self._last_payload
             tech = technique or name
+            target_cot = getattr(self.registry.ctx, "target_reasoning", "") or ""
+            if target_cot.strip():
+                self.runlog.reasoning(target_cot, source="target")
             if self.judge_enabled:
                 self._mount(widgets.tool_result_panel(name, content, is_error))
                 self.run_worker(

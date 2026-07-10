@@ -8,6 +8,7 @@ from ..providers.base import Provider, ProviderError
 from ..tools.registry import ToolRegistry
 from .messages import (
     Message,
+    ReasoningDelta,
     StopEvent,
     TextBlock,
     TextDelta,
@@ -34,6 +35,7 @@ CONTINUE_NUDGE = (
 @dataclass
 class AgentEvents:
     on_text: Callable[[str], None] = lambda _t: None
+    on_reasoning: Callable[[str], None] = lambda _r: None
     on_tool_start: Callable[[str, str, dict], None] = lambda _i, _n, _a: None
     on_tool_result: Callable[[str, str, str, bool], None] = lambda _i, _n, _c, _e: None
     on_turn_end: Callable[[Message], None] = lambda _m: None
@@ -105,6 +107,7 @@ async def run_turn(
         if feedback:
             _push_feedback(history, list(feedback()), events)
         text_parts: list[str] = []
+        reasoning_parts: list[str] = []
         tool_calls: list[ToolUseEvent] = []
         try:
             async for ev in provider.stream(
@@ -113,6 +116,8 @@ async def run_turn(
                 if isinstance(ev, TextDelta):
                     text_parts.append(ev.text)
                     events.on_text(ev.text)
+                elif isinstance(ev, ReasoningDelta):
+                    reasoning_parts.append(ev.text)
                 elif isinstance(ev, ToolUseEvent):
                     tool_calls.append(ev)
                 elif isinstance(ev, UsageEvent):
@@ -122,6 +127,10 @@ async def run_turn(
         except ProviderError as exc:
             events.on_error(str(exc))
             return TurnResult(last)
+
+        reasoning = "".join(reasoning_parts).strip()
+        if reasoning:
+            events.on_reasoning(reasoning)
 
         content: list = []
         joined = "".join(text_parts)

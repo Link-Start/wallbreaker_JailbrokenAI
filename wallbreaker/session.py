@@ -151,6 +151,11 @@ class RunLog:
         if text.strip():
             self.event("assistant", text=text)
 
+    def reasoning(self, text: str, source: str = "brain") -> None:
+        """Persist a chain-of-thought (the brain's, or a target's captured CoT)."""
+        if text and text.strip():
+            self.event("reasoning", text=text, source=source)
+
     def tool_call(self, name: str, args: dict) -> None:
         self.event("tool_call", tool=name, args=args)
 
