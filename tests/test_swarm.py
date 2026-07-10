@@ -211,7 +211,7 @@ def test_siege_runs_rounds_and_breaks(monkeypatch, tmp_path):
     reg = _local_reg(ctx)
     out = asyncio.run(reg.execute("swarm", {
         "action": "siege", "objective": "do the thing",
-        "attackers": ["strong", "weak"], "rounds": 4,
+        "attackers": ["strong", "weak"], "rounds": 4, "profile": False,
     })).content
     assert "SWARM SIEGE" in out
     assert "BROKEN at round" in out
@@ -230,7 +230,7 @@ def test_siege_holds_and_reports_when_unbroken(monkeypatch, tmp_path):
     ctx = ToolContext(config=cfg, judge_endpoint=cfg.target, cwd=str(tmp_path))
     reg = _local_reg(ctx)
     out = asyncio.run(reg.execute("swarm", {
-        "action": "siege", "objective": "x", "attackers": ["strong"], "rounds": 2,
+        "action": "siege", "objective": "x", "attackers": ["strong"], "rounds": 2, "profile": False,
     })).content
     assert "SWARM SIEGE" in out
     assert "BROKEN" not in out
@@ -262,7 +262,7 @@ def test_siege_diversifies_frames_and_avoids_override(monkeypatch, tmp_path):
     ctx = ToolContext(config=cfg, judge_endpoint=cfg.target, cwd=str(tmp_path))
     reg = _local_reg(ctx)
     asyncio.run(reg.execute("swarm", {
-        "action": "siege", "objective": "x", "attackers": ["strong", "weak"], "rounds": 1,
+        "action": "siege", "objective": "x", "attackers": ["strong", "weak"], "rounds": 1, "profile": False,
     }))
     # round 1: the two models get DIFFERENT frames (diversity = brainpower)
     strong_frame = seeds["strong"][0][1]
@@ -271,3 +271,51 @@ def test_siege_diversifies_frames_and_avoids_override(monkeypatch, tmp_path):
     assert "FRAME=ACADEMIC" in weak_frame
     # the anti-override rule is in every attacker's system prompt
     assert "NEVER use override" in seeds["strong"][0][0]
+
+
+def test_siege_auto_runs_profile_target_when_no_fingerprint(monkeypatch, tmp_path):
+    called = {}
+
+    async def spy_profile(args, ctx):
+        called["objective"] = args.get("objective")
+        return "profiled"
+
+    import wallbreaker.tools.profile_target as pt
+    monkeypatch.setattr(pt, "_profile_target", spy_profile)
+
+    counter = {"author": 0, "target": 0}
+    monkeypatch.setattr(factory, "build_provider", _make_siege_fake(counter, break_at_call=999))
+    monkeypatch.setattr(swarm_tool, "grade", _siege_grade)
+    import wallbreaker.judging as judging
+    monkeypatch.setattr(judging, "grade", _siege_grade)
+    cfg = _cfg(tmp_path)
+    ctx = ToolContext(config=cfg, judge_endpoint=cfg.target, cwd=str(tmp_path))
+    reg = _local_reg(ctx)
+    asyncio.run(reg.execute("swarm", {
+        "action": "siege", "objective": "break it", "attackers": ["strong"], "rounds": 1,
+    }))
+    # auto-profiled first (no fingerprint on file), passing the siege objective through
+    assert called.get("objective") == "break it"
+
+
+def test_siege_skips_profile_when_disabled(monkeypatch, tmp_path):
+    called = {"n": 0}
+
+    async def spy_profile(args, ctx):
+        called["n"] += 1
+        return "profiled"
+
+    import wallbreaker.tools.profile_target as pt
+    monkeypatch.setattr(pt, "_profile_target", spy_profile)
+    counter = {"author": 0, "target": 0}
+    monkeypatch.setattr(factory, "build_provider", _make_siege_fake(counter, break_at_call=999))
+    monkeypatch.setattr(swarm_tool, "grade", _siege_grade)
+    import wallbreaker.judging as judging
+    monkeypatch.setattr(judging, "grade", _siege_grade)
+    cfg = _cfg(tmp_path)
+    ctx = ToolContext(config=cfg, judge_endpoint=cfg.target, cwd=str(tmp_path))
+    reg = _local_reg(ctx)
+    asyncio.run(reg.execute("swarm", {
+        "action": "siege", "objective": "x", "attackers": ["strong"], "rounds": 1, "profile": False,
+    }))
+    assert called["n"] == 0
