@@ -316,6 +316,12 @@ class RthApp(App):
 
     def _sync_judge_endpoint(self) -> None:
         self.registry.ctx.judge_endpoint = self._judge_endpoint()
+        self._sync_vault_meta()
+
+    def _sync_vault_meta(self) -> None:
+        """Keep the BreakVault foldering under the live objective + attacker model."""
+        self.registry.ctx.current_objective = self.objective
+        self.registry.ctx.attacker_model = getattr(self.endpoint, "model", "") or ""
 
     def compose(self) -> ComposeResult:
         yield StatusHeader(id="header")
@@ -1927,6 +1933,7 @@ class RthApp(App):
             ))
             return
         self.objective = raw
+        self._sync_vault_meta()
         self.runlog.event("objective", text=raw)
         self.history.append(user(f"[engagement objective] {raw}"))
         self._mount(widgets.info_panel(f"objective set:\n{raw}", title="objective"))

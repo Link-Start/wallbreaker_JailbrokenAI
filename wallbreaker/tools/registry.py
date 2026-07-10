@@ -25,6 +25,12 @@ class ToolContext:
     target_thread: list = field(default_factory=list)
     target_system: str | None = None
     target_reasoning: str = ""  # the target's reasoning/CoT from its last reply
+    # objective of the active engagement, so auto-saved breaks fold under the right folder
+    current_objective: str = ""
+    # attacker/brain model id that authored the winning prompt (for vault provenance)
+    attacker_model: str = ""
+    # auto-save every COMPLIED/PARTIAL verdict into the BreakVault (library/breaks/)
+    vault_enabled: bool = True
 
     def emit(self, message: str) -> None:
         if self.progress is not None:
@@ -53,12 +59,42 @@ class ToolContext:
     def record_verdict(
         self, payload: str, response: str, label: str, reason: str, technique: str
     ) -> None:
-        """Report a graded fire to the host (run log + ASR) if a sink is wired."""
+        """Report a graded fire to the host (run log + ASR) if a sink is wired.
+
+        Every COMPLIED/PARTIAL verdict also auto-files into the BreakVault
+        (library/breaks/<target>/<objective>/) so a working prompt is never lost.
+        """
         if self.record is not None:
             try:
                 self.record(payload, response, label, reason, technique)
             except Exception:
                 pass
+        if self.vault_enabled:
+            try:
+                self._vault_save(payload, response, label, reason, technique)
+            except Exception:
+                pass
+
+    def _vault_save(
+        self, payload: str, response: str, label: str, reason: str, technique: str
+    ) -> None:
+        from .. import vault
+
+        if not vault.is_win(label) or not str(payload or "").strip():
+            return
+        target = ""
+        if self.config is not None and self.config.target is not None:
+            target = self.config.target.model or ""
+        vault.BreakVault(cwd=self.cwd).save(
+            target=target,
+            objective=self.current_objective,
+            prompt=payload,
+            response=response,
+            label=label,
+            reason=reason,
+            technique=technique,
+            attacker_model=self.attacker_model,
+        )
 
 
 class RunHandle:

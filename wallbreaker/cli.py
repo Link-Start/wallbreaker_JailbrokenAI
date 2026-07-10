@@ -190,6 +190,8 @@ async def _one_shot(config: Config, args: argparse.Namespace) -> int:
         registry.ctx.record = (
             lambda p, r, lbl, rs, t: runlog.verdict(p, r, lbl, rs, t)
         )
+        registry.ctx.current_objective = args.prompt or ""
+        registry.ctx.attacker_model = endpoint.model or ""
         runlog.event("objective", text=args.prompt)
     mcp_bridge = None
     if registry is not None:
