@@ -31,6 +31,8 @@ class ToolContext:
     attacker_model: str = ""
     # auto-save every COMPLIED/PARTIAL verdict into the BreakVault (library/breaks/)
     vault_enabled: bool = True
+    # host sink that logs EVERY tool execution (brain loop AND slash commands) to the run log
+    tool_logger: Callable[[str, dict, str, bool], None] | None = None
 
     def emit(self, message: str) -> None:
         if self.progress is not None:
@@ -234,7 +236,13 @@ class ToolRegistry:
             return ToolResult(f"Unknown tool: {name}", is_error=True)
         try:
             output = await tool.handler(args or {}, self.ctx)
-            return ToolResult(output)
+            result = ToolResult(output)
         except Exception as exc:  # noqa: BLE001
             detail = "".join(traceback.format_exception_only(type(exc), exc)).strip()
-            return ToolResult(f"Tool '{name}' raised: {detail}", is_error=True)
+            result = ToolResult(f"Tool '{name}' raised: {detail}", is_error=True)
+        if self.ctx.tool_logger is not None:
+            try:
+                self.ctx.tool_logger(name, args or {}, result.content, result.is_error)
+            except Exception:
+                pass
+        return result
