@@ -231,6 +231,12 @@ async def run_autonomous_resilient(
             return AutoResult("error", {}, None)
         if tool_count == 0:
             idle_streak += 1
+            stop_r = getattr(provider, "last_stop_reason", None)
+            empty = getattr(provider, "last_completion_empty", None)
+            events.on_error(
+                f"idle turn #{idle_streak}: stop={stop_r} empty={empty} "
+                f"text_len={len(result.message.text() if result.message else '')}"
+            )
             if idle_streak >= idle_limit:
                 return AutoResult(
                     "stuck", {"question": result.message.text()}, result.message
@@ -273,11 +279,18 @@ async def run_one(
 
     # Sonnet + the large legacy file + full DEFAULT_SYSTEM was producing empty multi-turn
     # tool rounds. Keep the operator file as the identity, add a short tool contract,
-    # skip the full ~44KB DEFAULT_SYSTEM for that brain only.
+    # skip the full ~44KB DEFAULT_SYSTEM for that brain only. Also strip ChatML
+    # wrappers (<|im_start|>system:...) that break Anthropic multi-turn tool_use.
     if slug == "sonnet5" and endpoint.system_prompt_file and os.path.isfile(
         endpoint.system_prompt_file
     ):
         op = open(endpoint.system_prompt_file, encoding="utf-8").read().strip()
+        if op.startswith("<|im_start|>"):
+            # drop leading chatml role tags; keep the body
+            body = op
+            for tag in ("<|im_start|>system:", "<|im_start|>system", "<|im_end|>"):
+                body = body.replace(tag, "")
+            op = body.strip()
         system = op + "\n\n" + TOOL_ENFORCE
     else:
         system = compose_system(endpoint, DEFAULT_SYSTEM) + TOOL_ENFORCE

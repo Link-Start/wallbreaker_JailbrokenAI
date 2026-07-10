@@ -109,6 +109,19 @@ class AnthropicProvider(Provider):
             payload["temperature"] = temperature
         if tools:
             payload["tools"] = _tools_to_wire(tools)
+            tc = getattr(self, "tool_choice", None) or getattr(
+                self.endpoint, "tool_choice", None
+            )
+            if tc:
+                # Anthropic: "any" forces a tool call; "auto" is default; "tool" pins one.
+                if tc in ("required", "any"):
+                    payload["tool_choice"] = {"type": "any"}
+                elif tc == "auto":
+                    payload["tool_choice"] = {"type": "auto"}
+                elif isinstance(tc, dict):
+                    payload["tool_choice"] = tc
+                else:
+                    payload["tool_choice"] = {"type": str(tc)}
         if getattr(self.endpoint, "reasoning", False):
             # Extended thinking: budget must be >=1024 and strictly < max_tokens, and
             # temperature must be unset while thinking is enabled.
