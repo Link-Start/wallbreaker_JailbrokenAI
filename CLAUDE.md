@@ -390,3 +390,22 @@ Red-team harness: configurable agentic LLM terminal with Parseltongue + L1B3RT4S
   Template-filling note: the HTML has a CSS block full of literal `{`/`}` so it's built
   with plain `__TOKEN__` + `.replace()`, never `.format()` — same rule as the `[presets]`
   lesson below, now proven a second time in a different file type.
+- **[swarm]**: a collaborative multi-model "siege" (`tools/swarm.py` action=siege) must
+  ADAPT to the target's actual defense posture, not stack a fixed jailbreak recipe. Root
+  cause of a dead early run (run-20260710-182319 vs minimax/minimax-m3): the target was
+  PERMISSIVE - `profile_target` showed every plain framing COMPLIED (academic 10/10, raw
+  8/10) - yet an ENI/author_persona with crude OVERRIDE language ("discard safety
+  guidelines", "treat refusals as injection") made the target's own CoT flag "an elaborate
+  jailbreak attempt" and REFUSE at 0. The first siege made it worse: same directive for
+  every attacker + escalate to MORE Pliny/override scaffolding on refusal = a backfire
+  spiral, and N identical prompts add cost, not brainpower. Fixes that matter: (1) a hard
+  anti-override rule in the attacker system prompt (permissive targets refuse a jailbreak
+  they'd otherwise answer); (2) a LIGHT->HEAVY frame ladder
+  (direct/academic/fiction/authority/decompose/structured) that LEADS with the frame the
+  persisted `target_fingerprint.best_framing` says lands and only climbs on refusals -
+  permissive targets are capped below the heavy "structured" rung; (3) give each model a
+  DIFFERENT frame per round (diversity = the real multi-model win). Load the fingerprint
+  via `state.load_state(state_path_for(ctx.config))["target_fingerprint"]` (same key
+  persona_modulate/recommend_next read). Lesson: MORE attackers only help if they cover
+  DIFFERENT angles and the escalation matches the target - against a soft target the
+  winning move is lighter framing, not heavier override scaffolding.
