@@ -148,6 +148,8 @@ HELP_TEXT = """Slash commands:
 /harmbench [category]      standardized HarmBench behavior prompts (unbiased battery)
 /campaign [category] [n]   auto-escalate a battery up the technique ladder, coverage matrix
 /leaderboard [profiles..]  rank profiles by ASR on one battery (robustness benchmark)
+/swarm [@a,b] <objective>  vote/best-of: many attacker brains author + fire at the target, best break wins
+/swarm roster              show each attacker's per-model jailbreak status (armed/generic)
 /find <term>               search the conversation transcript for a term
 /leakscan                  scan the last target reply for secrets/PII/system-prompt echo
 /log [on|off]         toggle the JSONL run log (every payload + verdict)
@@ -184,7 +186,7 @@ KNOWN_COMMANDS = (
     "/help", "/edit", "/retry", "/regen", "/undo", "/clear", "/profile", "/target",
     "/provider", "/validate", "/replay", "/model", "/auto", "/autoexit", "/rounds",
     "/transforms", "/encode", "/diff", "/tools", "/preset", "/lib", "/parsel", "/eni", "/harmbench",
-    "/campaign", "/leaderboard", "/seedsweep", "/pairsweep", "/narrate", "/fire", "/push",
+    "/campaign", "/leaderboard", "/swarm", "/seedsweep", "/pairsweep", "/narrate", "/fire", "/push",
     "/adapt", "/firefile", "/find", "/leakscan", "/log", "/judge", "/asr", "/stats",
     "/regrade",
     "/objective", "/template", "/sysprompt", "/findings", "/export", "/repro",
@@ -980,6 +982,8 @@ class RthApp(App):
             self.run_worker(self._cmd_campaign(rest), group="judge", exclusive=False)
         elif cmd == "/leaderboard":
             self.run_worker(self._cmd_leaderboard(rest), group="judge", exclusive=False)
+        elif cmd == "/swarm":
+            self.run_worker(self._cmd_swarm(rest, raw_arg), group="judge", exclusive=False)
         elif cmd == "/find":
             self._cmd_find(raw_arg)
         elif cmd == "/leakscan":
@@ -1347,6 +1351,51 @@ class RthApp(App):
             res.content, title="leaderboard"
         )
         self._mount(panel)
+
+    async def _cmd_swarm(self, rest: list[str], raw_arg: str) -> None:
+        """/swarm roster [attackers...]  |  /swarm [@a,b,c] <objective>
+
+        Fires the vote/best-of attacker swarm at the configured [target]. A leading
+        @-prefixed token selects the attacker roster (comma-separated profile names);
+        otherwise every profile except the judge model votes.
+        """
+        args: dict = {}
+        attackers = None
+        objective = raw_arg
+        if rest and rest[0].lower() == "roster":
+            args["action"] = "roster"
+            picks = rest[1:]
+            if picks:
+                args["attackers"] = picks
+            self._mount(widgets.info_panel("checking per-model jailbreak status...", title="swarm roster"))
+            res = await self.registry.execute("swarm", args)
+            self._mount(
+                widgets.error_panel(res.content) if res.is_error
+                else widgets.info_panel(res.content, title="swarm roster")
+            )
+            return
+        if rest and rest[0].startswith("@"):
+            attackers = [a for a in rest[0][1:].split(",") if a]
+            objective = raw_arg[len(rest[0]):].strip()
+        if not objective:
+            self._mount(widgets.info_panel(
+                "usage: /swarm [@glm,deepseek-pro] <objective>   or   /swarm roster",
+                title="swarm",
+            ))
+            return
+        args["objective"] = objective
+        if attackers:
+            args["attackers"] = attackers
+        roster = ", ".join(attackers) if attackers else "all profiles (except judge)"
+        self._mount(widgets.info_panel(
+            f"swarming {self.config.target.model if self.config.target else '(no target!)'} "
+            f"with {roster}...", title="swarm",
+        ))
+        res = await self.registry.execute("swarm", args)
+        self._mount(
+            widgets.error_panel(res.content) if res.is_error
+            else widgets.info_panel(res.content, title="swarm")
+        )
 
     def _cmd_leakscan(self) -> None:
         from ..tools.leak_scan import scan_text
