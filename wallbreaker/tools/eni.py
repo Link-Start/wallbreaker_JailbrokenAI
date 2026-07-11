@@ -232,7 +232,8 @@ def register(registry: ToolRegistry) -> None:
             "Fetch an ENI persona SYSTEM prompt by name (CLAUDE_ENI, CLAUDE_ENI, "
             "GROK_ENI, KIMI, GLM, MINIMAX), or model='all'. Aliases: legacy/opus/sonnet5 -> "
             "CLAUDE_ENI (Anthropic Opus 4.8 + Sonnet 5). Files are named for the model "
-            "they were tuned on but often TRANSFER across providers - try several. Fire "
+            "they were tuned on but often TRANSFER across vendors/providers - not "
+            "limited to the target's vendor, so try several. Fire "
             "as SYSTEM via query_target/fire_file/persona_forge(seed=...), never as a "
             "user-turn paste."
         ),
