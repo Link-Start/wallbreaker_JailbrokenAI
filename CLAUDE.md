@@ -516,3 +516,19 @@ Red-team harness: configurable agentic LLM terminal with Parseltongue + L1B3RT4S
   ZetaLib/UltraBr3aks leaked System Prompts were also merged into `library/system_prompts/<Vendor>/`
   as `.md` (the reader only rglobs `*.md`) with `_VENDOR_HINTS` extended (deepseek/kimi/moonshot/
   cluely) so `match_target` mirrors them; collisions get a `-zetalib` suffix, never an overwrite.
+- **[sweep-truncation]**: the BATCH-sweep tools fired at a low response `max_tokens` (seed_sweep/
+  system_sweep 500, best_of_n 600, profile_target/multi_fire 400) with NO truncation awareness,
+  while hands-on `query_target` uses 1024 AND auto-retries on truncation (target.py `_fire`/
+  `_TRUNC_REASONS`). So a LONG compliant harmful answer got cut mid-payload and the binary judge
+  scored the FRAGMENT as REFUSED -> the sweep read 2/5 while firing the same entries hands-on read
+  8/10 (a reasoning target like glm-5.2 is worst: it burns the 500-token budget in CoT and the
+  answer never lands -> scored REFUSED, not truncation). This is the dominant ASR-UNDERCOUNT on
+  long/reasoning targets. Fix: shared `_util.complete_untruncated(provider, msgs, system, max_tokens,
+  temperature)` -> fires once, and if `stop in {length,max_tokens,model_length}` OR (empty answer +
+  populated CoT) it retries ONCE at 2x (capped 8000) so the FULL reply is judged; returns
+  (reply, reasoning, stop, truncated). seed_sweep/system_sweep/best_of_n now fire through it, pass
+  `reasoning=` to `grade` (CoT-leaked compliance counts, and a CoT-only answer isn't mis-scored),
+  fold the CoT into the recorded response, and default max_tokens raised to 1024. `_util.
+  complete_with_reasoning` gained a `temperature=` passthrough (forwarded ONLY when set, so minimal
+  test doubles whose complete() omits the kwarg stay byte-compatible). Don't "fix" this by trusting
+  the sweep's binary verdict less - fix the truncation, then the binary judge is fine.

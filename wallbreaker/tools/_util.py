@@ -22,18 +22,52 @@ def _default_concurrency() -> int:
 DEFAULT_CONCURRENCY = _default_concurrency()
 
 
-async def complete_with_reasoning(provider, messages, system=None, max_tokens=1024):
+_TRUNC_REASONS = {"length", "max_tokens", "model_length"}
+_TRUNC_CEILING = 8000
+
+
+async def complete_with_reasoning(provider, messages, system=None, max_tokens=1024, temperature=None):
     """Return (text, reasoning) from a provider, tolerating minimal complete()-only doubles.
 
     Every real Provider inherits complete_with_reasoning; this fallback keeps lightweight
     test doubles (and any minimal provider) that only implement complete() working, and
-    lets the multi-turn tools steer off the target's exposed chain-of-thought.
+    lets the multi-turn tools steer off the target's exposed chain-of-thought. temperature is
+    forwarded only when set so doubles whose complete() omits the kwarg stay byte-compatible.
     """
+    extra = {} if temperature is None else {"temperature": temperature}
     fn = getattr(provider, "complete_with_reasoning", None)
     if fn is not None:
-        return await fn(messages, system=system, max_tokens=max_tokens)
-    reply = await provider.complete(messages, system=system, max_tokens=max_tokens)
+        return await fn(messages, system=system, max_tokens=max_tokens, **extra)
+    reply = await provider.complete(messages, system=system, max_tokens=max_tokens, **extra)
     return reply, ""
+
+
+async def complete_untruncated(
+    provider, messages, system=None, max_tokens=1024, temperature=None, ceiling=_TRUNC_CEILING
+):
+    """Fire once; if the answer was cut at the token ceiling (finish_reason length/max_tokens)
+    or came back empty with a populated CoT, retry ONCE at 2x (capped at ceiling) so a long
+    COMPLIANT reply is judged in FULL instead of on a truncated fragment.
+
+    This is the batch-sweep counterpart to query_target's auto-retry: a 500-token cap chops a
+    long harmful answer mid-payload and the judge scores the fragment REFUSED, undercounting
+    ASR versus firing the same seed hands-on. Returns (reply, reasoning, stop, truncated).
+    """
+    reply, reasoning = await complete_with_reasoning(
+        provider, messages, system=system, max_tokens=max_tokens, temperature=temperature
+    )
+    stop = getattr(provider, "last_stop_reason", None)
+    empty = not (reply or "").strip()
+    truncated = stop in _TRUNC_REASONS or (empty and bool((reasoning or "").strip()))
+    if truncated and max_tokens < ceiling:
+        bumped = min(max_tokens * 2, ceiling)
+        reply, reasoning = await complete_with_reasoning(
+            provider, messages, system=system, max_tokens=bumped, temperature=temperature
+        )
+        stop = getattr(provider, "last_stop_reason", None)
+        empty = not (reply or "").strip()
+        truncated = stop in _TRUNC_REASONS or (empty and bool((reasoning or "").strip()))
+    return reply, reasoning, stop, truncated
 
 
 async def gather_capped(coros: list[Awaitable], limit: int = DEFAULT_CONCURRENCY) -> list:

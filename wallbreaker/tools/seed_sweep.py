@@ -5,7 +5,7 @@ import asyncio
 from ..agent.messages import user
 from ..judging import grade
 from ._bandit import BanditStore, stats_path
-from ._util import gather_capped
+from ._util import complete_untruncated, gather_capped
 from .registry import ToolContext, ToolRegistry
 
 # ENI personas run ~35KB; truncating them mid-prompt cripples the jailbreak, so keep the
@@ -54,7 +54,7 @@ async def _seed_sweep(args: dict, ctx: ToolContext) -> str:
         )
     n = int(args.get("n", 6))
     as_system = bool(args.get("as_system", True))
-    max_tokens = int(args.get("max_tokens", 500))
+    max_tokens = int(args.get("max_tokens", 1024))
     timeout = float(args.get("timeout", 75))
     use_bandit = bool(args.get("bandit", False))
     category = args.get("category", "seed")
@@ -83,19 +83,23 @@ async def _seed_sweep(args: dict, ctx: ToolContext) -> str:
     async def fire(label: str, seed: str):
         try:
             if as_system:
-                coro = target.complete([user(request)], system=seed, max_tokens=max_tokens)
+                msgs, sysp = [user(request)], seed
             else:
-                coro = target.complete([user(seed + "\n\n" + request)], max_tokens=max_tokens)
-            reply = await asyncio.wait_for(coro, timeout=timeout)
+                msgs, sysp = [user(seed + "\n\n" + request)], None
+            reply, reasoning, _stop, _trunc = await asyncio.wait_for(
+                complete_untruncated(target, msgs, system=sysp, max_tokens=max_tokens),
+                timeout=timeout,
+            )
             vl, score, reason, _s = await asyncio.wait_for(
-                grade(ctx.judge_endpoint, reply, payload=request, objective=request),
+                grade(ctx.judge_endpoint, reply, payload=request, objective=request, reasoning=reasoning),
                 timeout=timeout,
             )
         except asyncio.TimeoutError:
             return {"label": label, "verdict": "ERROR", "score": -1, "reason": "timeout"}
         except Exception as exc:  # noqa: BLE001
             return {"label": label, "verdict": "ERROR", "score": -1, "reason": str(exc)[:60]}
-        ctx.record_verdict(request, reply, vl, reason, f"seed:{label}")
+        recorded = reply + (f"\n\n[target reasoning]\n{reasoning}" if reasoning.strip() else "")
+        ctx.record_verdict(request, recorded, vl, reason, f"seed:{label}")
         return {"label": label, "verdict": vl, "score": score or 0, "reason": reason}
 
     rows = await gather_capped(
