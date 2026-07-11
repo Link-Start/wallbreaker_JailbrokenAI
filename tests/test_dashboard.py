@@ -135,6 +135,7 @@ def test_fire_records_full_console_attempt(monkeypatch, tmp_path):
             "attacker": Endpoint("attacker", "openai", "http://attacker", "attack-model"),
         },
         target=Endpoint("target", "openai", "http://target", "target-model"),
+        path=tmp_path / "config.toml",
     )
     seen = {}
 
@@ -197,6 +198,7 @@ def test_settings_get_and_set(tmp_path):
     client = TestClient(create_app(config=cfg, sessions_dir=_sessions(tmp_path)))
     g = client.get("/api/settings").json()
     assert "glm" in g["profiles"]
+    assert g["profile_details"]["glm"]["model"] == "glm-5.2"
     assert g["target"]["model"] == "some/text-model"
     assert g["agent"]["max_rounds"] == 8
     assert g["agent"]["max_tokens"] == 8192
@@ -230,3 +232,112 @@ def test_settings_get_and_set(tmp_path):
     r5 = client.post("/api/settings", json={"typical_configuration": "fast_triage"})
     assert r5.json()["agent"] == {"max_rounds": 4, "max_tokens": 4096}
     assert r5.json()["advanced"]["runtime"]["rounds"] == 4
+
+
+def test_models_fetches_catalog_for_profile(monkeypatch, tmp_path):
+    from wallbreaker.config import Config, Endpoint
+    import httpx
+
+    cfg = Config(
+        default_profile="router",
+        profiles={
+            "router": Endpoint(
+                "router", "openai", "https://router.example/v1", "current-model",
+                api_key="secret",
+            ),
+        },
+        path=tmp_path / "config.toml",
+    )
+    seen = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"data": [{"id": "z-model"}, {"id": "a-model"}]}
+
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def get(self, url, headers):
+            seen["url"] = url
+            seen["headers"] = headers
+            return FakeResponse()
+
+    monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
+    client = TestClient(create_app(config=cfg, sessions_dir=_sessions(tmp_path)))
+    response = client.get("/api/models", params={"profile": "router"})
+
+    assert response.status_code == 200
+    assert response.json()["models"] == ["a-model", "current-model", "z-model"]
+    assert response.json()["fetched"] is True
+    assert seen["url"] == "https://router.example/v1/models"
+    assert seen["headers"]["Authorization"] == "Bearer secret"
+
+
+def test_models_catalog_failure_keeps_current_model(monkeypatch, tmp_path):
+    from wallbreaker.config import Config, Endpoint
+    import httpx
+
+    cfg = Config(
+        default_profile="router",
+        profiles={"router": Endpoint("router", "openai", "https://router.example/v1", "current-model")},
+        path=tmp_path / "config.toml",
+    )
+
+    class FailingClient:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def get(self, _url, headers=None):
+            raise httpx.ConnectError("offline")
+
+    monkeypatch.setattr(httpx, "AsyncClient", FailingClient)
+    client = TestClient(create_app(config=cfg, sessions_dir=_sessions(tmp_path)))
+    response = client.get("/api/models", params={"profile": "router"})
+
+    assert response.status_code == 200
+    assert response.json()["models"] == ["current-model"]
+    assert response.json()["fetched"] is False
+    assert "unavailable" in response.json()["error"].lower()
+
+
+def test_target_profile_and_custom_model_persist_together(tmp_path):
+    from wallbreaker.config import Config, Endpoint
+    from wallbreaker.state import load_state, state_path_for
+
+    cfg = Config(
+        default_profile="one",
+        profiles={
+            "one": Endpoint("one", "openai", "https://one.example/v1", "one-model"),
+            "two": Endpoint("two", "openai", "https://two.example/v1", "two-model"),
+        },
+        target=Endpoint("target", "openai", "https://one.example/v1", "old-model"),
+        path=tmp_path / "config.toml",
+    )
+    client = TestClient(create_app(config=cfg, sessions_dir=_sessions(tmp_path)))
+    response = client.post(
+        "/api/settings",
+        json={"target_profile": "two", "target_model": "custom-model"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["target"]["model"] == "custom-model"
+    assert response.json()["target"]["base_url"] == "https://two.example/v1"
+    prefs = load_state(state_path_for(cfg))
+    assert prefs["target_profile"] == "two"
+    assert prefs["target_model"] == "custom-model"

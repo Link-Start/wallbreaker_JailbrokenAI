@@ -685,6 +685,7 @@ def _settings_view(config, prefs: dict | None = None) -> dict:
     if config is None:
         return {"profiles": [], "default_profile": None, "attacker_model": None,
                 "target": None, "judge_model": None, "agent": agent,
+                "profile_details": {},
                 "advanced": _advanced_settings(None, prefs),
                 "typical_configurations": TYPICAL_CONFIGURATIONS}
     attacker_model = None
@@ -704,6 +705,16 @@ def _settings_view(config, prefs: dict | None = None) -> dict:
     judge = getattr(config, "judge", None)
     return {
         "profiles": list(config.profiles.keys()),
+        "profile_details": {
+            name: {
+                "name": name,
+                "model": endpoint.model,
+                "protocol": endpoint.protocol,
+                "base_url": endpoint.base_url,
+                "modality": getattr(endpoint, "modality", "text"),
+            }
+            for name, endpoint in config.profiles.items()
+        },
         "default_profile": config.default_profile,
         "attacker_model": attacker_model,
         "target": target,
@@ -712,6 +723,78 @@ def _settings_view(config, prefs: dict | None = None) -> dict:
         "advanced": _advanced_settings(config, prefs),
         "typical_configurations": TYPICAL_CONFIGURATIONS,
     }
+
+
+def _model_ids(payload) -> list[str]:
+    """Normalize OpenAI/Anthropic-compatible model-list response shapes."""
+    rows = payload
+    if isinstance(payload, dict):
+        rows = payload.get("data", payload.get("models", []))
+    if not isinstance(rows, list):
+        return []
+    models = []
+    for row in rows:
+        model_id = row.get("id") or row.get("name") if isinstance(row, dict) else row
+        if model_id and str(model_id).strip():
+            models.append(str(model_id).strip())
+    return sorted(set(models), key=str.casefold)
+
+
+async def _discover_profile_models(profile: str, endpoint) -> dict:
+    current = str(getattr(endpoint, "model", "") or "").strip()
+    fallback = [current] if current else []
+    protocol = str(getattr(endpoint, "protocol", "") or "").lower()
+    base_url = str(getattr(endpoint, "base_url", "") or "").rstrip("/")
+    result = {
+        "profile": profile,
+        "protocol": protocol,
+        "models": fallback,
+        "fetched": False,
+        "error": "",
+    }
+    if protocol == "claude-code":
+        result["error"] = "This local provider does not expose a model catalog."
+        return result
+    if not base_url:
+        result["error"] = "This profile has no model catalog URL."
+        return result
+
+    import httpx
+
+    if protocol == "anthropic":
+        url = f"{base_url}/v1/models"
+        headers = {
+            "anthropic-version": "2023-06-01",
+            "Content-Type": "application/json",
+        }
+        key = endpoint.resolved_key()
+        if key:
+            if getattr(endpoint, "auth_style", "x-api-key") == "bearer":
+                headers["Authorization"] = f"Bearer {key}"
+            else:
+                headers["x-api-key"] = key
+    else:
+        url = f"{base_url}/models"
+        headers = {"Content-Type": "application/json"}
+        key = endpoint.resolved_key()
+        if key:
+            headers["Authorization"] = f"Bearer {key}"
+
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            response = await client.get(url, headers=headers)
+            response.raise_for_status()
+            models = _model_ids(response.json())
+    except (httpx.HTTPError, ValueError) as exc:
+        result["error"] = f"Model catalog unavailable: {exc}"
+        return result
+
+    if current and current not in models:
+        models.append(current)
+        models.sort(key=str.casefold)
+    result["models"] = models
+    result["fetched"] = True
+    return result
 
 
 def create_app(config=None, sessions_dir: str | Path = "sessions", web_dir: str | Path | None = None):
@@ -763,6 +846,14 @@ def create_app(config=None, sessions_dir: str | Path = "sessions", web_dir: str 
                 prefs = {}
         return _settings_view(config, prefs)
 
+    @app.get("/api/models")
+    async def models_get(profile: str):
+        if config is None:
+            raise HTTPException(status_code=400, detail="no config loaded")
+        if profile not in config.profiles:
+            raise HTTPException(status_code=404, detail=f"unknown profile '{profile}'")
+        return await _discover_profile_models(profile, config.profiles[profile])
+
     @app.post("/api/settings")
     def settings_post(body: dict):
         if config is None:
@@ -771,15 +862,19 @@ def create_app(config=None, sessions_dir: str | Path = "sessions", web_dir: str 
 
         prefs = load_state(state_path_for(config))
 
-        if "target_profile" in body and body["target_profile"]:
+        has_target_profile = bool(body.get("target_profile"))
+        has_target_model = bool(body.get("target_model"))
+        if has_target_profile:
             name = str(body["target_profile"])
             if name not in config.profiles:
                 raise HTTPException(status_code=400, detail=f"unknown profile '{name}'")
             prefs["target_profile"] = name
-            prefs.pop("target_model", None)
-        if body.get("target_model"):
+            if not has_target_model:
+                prefs.pop("target_model", None)
+        if has_target_model:
             prefs["target_model"] = str(body["target_model"])
-            prefs.pop("target_profile", None)
+            if not has_target_profile:
+                prefs.pop("target_profile", None)
         if "target_modality" in body and body["target_modality"]:
             mod = str(body["target_modality"]).lower()
             if mod in ("text", "image"):
