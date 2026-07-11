@@ -12,6 +12,23 @@ Red-team harness: configurable agentic LLM terminal with Parseltongue + L1B3RT4S
   with `lossy` flags.
 
 ## Lessons Learned
+- **[speed/http]**: every `provider.stream()`/`complete()` used to open a NEW
+  `httpx.AsyncClient` per call (anthropic/openai/image), so every model call re-did the TCP+TLS
+  handshake (~100-300ms) - brutal across a 100-round brain loop and batteries (best_of_n reuses
+  ONE provider instance across all fires, so the waste was pure). Fix: `base.Provider` holds a
+  persistent keep-alive client (`_http_client()`), loop-affine (rebuilt if the instance is reused
+  under a different event loop - httpx clients are loop-bound, and each `asyncio.run` is a fresh
+  loop) with `_POOL_LIMITS` + HTTP/2 (`httpx[http2]`, `_http2_ok()` falls back to 1.1 if h2 is
+  missing). CRITICAL for tests: `_make_client` is overridden IN EACH provider module
+  (openai/anthropic) so `monkeypatch.setattr("...openai_provider.httpx.AsyncClient", Fake)` still
+  hits; and `self.timeout` is baked into the client at creation (NOT passed per-request) so the
+  `client.stream(method, url, headers, json)` call signature the fakes expect stays byte-identical
+  (the timeout-test/validate-test fakes define `stream` with no `timeout` kwarg). Fake clients in
+  tests need `is_closed` (the reuse check reads `getattr(client, "is_closed", False)`) and an
+  async `aclose`. The standalone `image_provider.vision_complete` (module fn, one-shot, no instance)
+  keeps its per-call client - nothing to pool. `DEFAULT_CONCURRENCY` moved to 12 (from 8), env-
+  tunable via `WALLBREAKER_CONCURRENCY` (clamped 1..64): raise for OpenRouter, lower for single-key
+  z.ai/glm coding plans that 429-stall past ~16 concurrent (per the [long-tools] lesson).
 - **[cost/cache]**: the agentic loop (`agent/loop.py run_turn`) re-sends the WHOLE `history`
   to `provider.stream()` every round with no compaction, so per-round input grows linearly and
   total input cost over N rounds is O(N^2). The static prefix alone is huge — `DEFAULT_SYSTEM`

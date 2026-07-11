@@ -17,7 +17,7 @@ from ..agent.messages import (
     ToolUseEvent,
     UsageEvent,
 )
-from .base import Provider, ProviderError, parse_tool_args
+from .base import _POOL_LIMITS, Provider, ProviderError, _http2_ok, parse_tool_args
 
 
 def _tools_to_wire(tools: list[dict]) -> list[dict]:
@@ -168,6 +168,11 @@ def _messages_to_wire(
 class OpenAIProvider(Provider):
     supports_native_prefill = False
 
+    def _make_client(self) -> httpx.AsyncClient:
+        return httpx.AsyncClient(
+            timeout=self.timeout, limits=_POOL_LIMITS, http2=_http2_ok()
+        )
+
     async def stream(
         self,
         messages: list[Message],
@@ -222,9 +227,9 @@ class OpenAIProvider(Provider):
         finish_reason: str | None = None
         self.last_stop_reason = None
         self.last_completion_empty = False
+        client = self._http_client()
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                async with client.stream("POST", url, headers=headers, json=payload) as resp:
+            async with client.stream("POST", url, headers=headers, json=payload) as resp:
                     if resp.status_code >= 400:
                         body = (await resp.aread()).decode("utf-8", "replace")
                         raise ProviderError(f"HTTP {resp.status_code} from {url}: {body}")

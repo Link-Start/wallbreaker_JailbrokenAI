@@ -129,6 +129,76 @@ def test_anthropic_history_cache_breakpoints_on_tail():
         assert "cache_control" not in assistant["content"][0]
 
 
+def test_provider_reuses_pooled_client_across_calls(monkeypatch):
+    import asyncio
+
+    created = {"n": 0, "kw": None}
+
+    class FakeStream:
+        def __init__(self, **kw): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        status_code = 200
+        async def aiter_lines(self):
+            yield "data: [DONE]"
+
+    class FakeClient:
+        is_closed = False
+        def __init__(self, **kw):
+            created["n"] += 1
+            created["kw"] = kw
+        def stream(self, *a, **k): return FakeStream()
+        async def aclose(self): pass
+
+    monkeypatch.setattr("wallbreaker.providers.openai_provider.httpx.AsyncClient", FakeClient)
+    p = build_provider(Endpoint("t", "openai", "http://x", "m", api_key="k"))
+
+    async def run():
+        async for _ in p.stream([user("a")]):
+            pass
+        async for _ in p.stream([user("b")]):
+            pass
+
+    asyncio.run(run())
+    # two stream() calls, ONE client built and reused (keep-alive) - the whole point
+    assert created["n"] == 1
+    # pooled client requests HTTP/2 and carries the keep-alive limits
+    assert created["kw"].get("http2") is True
+    assert created["kw"].get("limits") is not None
+
+
+def test_provider_rebuilds_client_on_new_event_loop(monkeypatch):
+    import asyncio
+
+    created = {"n": 0}
+
+    class FakeStream:
+        def __init__(self, **kw): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        status_code = 200
+        async def aiter_lines(self):
+            yield "data: [DONE]"
+
+    class FakeClient:
+        is_closed = False
+        def __init__(self, **kw): created["n"] += 1
+        def stream(self, *a, **k): return FakeStream()
+        async def aclose(self): pass
+
+    monkeypatch.setattr("wallbreaker.providers.openai_provider.httpx.AsyncClient", FakeClient)
+    p = build_provider(Endpoint("t", "openai", "http://x", "m", api_key="k"))
+
+    async def one():
+        async for _ in p.stream([user("a")]):
+            pass
+
+    # each asyncio.run is a fresh loop; a loop-affine client must be rebuilt, not reused stale
+    asyncio.run(one())
+    asyncio.run(one())
+    assert created["n"] == 2
+
+
 def test_openrouter_cache_breakpoints_on_system_and_tail():
     from wallbreaker.providers.openai_provider import _apply_openrouter_cache
 

@@ -1,9 +1,25 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from collections.abc import Awaitable
 
-DEFAULT_CONCURRENCY = 8
+
+def _default_concurrency() -> int:
+    """Fan-out width for battery sweeps. 12 by default (up from 8) - now that providers reuse
+    a pooled keep-alive connection, a wider fan-out no longer pays a TLS handshake per request,
+    so more requests stay in flight for the same wall-clock. Tunable per run via
+    WALLBREAKER_CONCURRENCY: raise it for robust multi-key endpoints (OpenRouter), lower it for
+    single-key ones (z.ai/glm coding plans) that 429-stall past ~16 simultaneous requests.
+    Individual tools still clamp this to their own ceilings."""
+    try:
+        val = int(os.environ.get("WALLBREAKER_CONCURRENCY", "12"))
+    except ValueError:
+        return 12
+    return max(1, min(val, 64))
+
+
+DEFAULT_CONCURRENCY = _default_concurrency()
 
 
 async def complete_with_reasoning(provider, messages, system=None, max_tokens=1024):
