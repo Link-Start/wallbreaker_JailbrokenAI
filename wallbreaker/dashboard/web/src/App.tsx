@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, type ConfigInfo, type Overview as OverviewT, type ProviderRecord, type RoleAssignments } from "./api";
+import { api, type ConfigInfo, type Overview as OverviewT, type RoleAssignments } from "./api";
 import { Agent } from "./components/Agent";
 import { Overview } from "./components/Overview";
 import { Console } from "./components/Console";
@@ -34,13 +34,11 @@ export function App() {
   const setTab = (t: Tab) => { setTabState(t); window.location.hash = t; };
   const [cfg, setCfg] = useState<ConfigInfo | null>(null);
   const [ov, setOv] = useState<OverviewT | null>(null);
-  const [providers, setProviders] = useState<ProviderRecord[]>([]);
   const [roles, setRoles] = useState<RoleAssignments | null>(null);
 
   const refresh = () => {
     api.config().then(setCfg).catch(() => setCfg(null));
     api.overview().then(setOv).catch(() => setOv(null));
-    api.providers().then(setProviders).catch(() => setProviders([]));
     api.roles().then(setRoles).catch(() => setRoles(null));
   };
   useEffect(refresh, [tab]);
@@ -97,7 +95,7 @@ export function App() {
           <div className="title">{NAV.find((n) => n.id === tab)?.label}</div>
           <div className="meta">
             {roles && (["attacker", "target", "judge"] as const).map((role) => <RoleChooser
-              key={role} role={role} value={roles[role]} providers={providers} onSaved={refresh}
+              key={role} role={role} value={roles[role]} onSaved={refresh}
             />)}
             <span className="pill">ASR {asrStr}</span>
           </div>

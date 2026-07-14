@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type ProviderRecord } from "../api";
+import { invalidateModelCatalog, invalidateProviders, loadProviders } from "../dataCache";
 
 const EMPTY = {
   name: "", protocol: "openai", base_url: "", model: "", api_key_env: "",
@@ -13,7 +14,7 @@ export function ProviderManager({ onChanged }: { onChanged: () => void }) {
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
-  const load = () => api.providers().then(setProviders).catch((error) => setStatus((error as Error).message));
+  const load = (force = false) => loadProviders(force).then(setProviders).catch((error) => setStatus((error as Error).message));
   useEffect(() => { void load(); }, []);
   const edit = (provider?: ProviderRecord) => {
     setEditing(true); setStatus("");
@@ -24,13 +25,16 @@ export function ProviderManager({ onChanged }: { onChanged: () => void }) {
     const name = String(form.name || "").trim();
     if (!name) return;
     setBusy(true); setStatus("");
-    try { await api.saveProvider(name, form); setEditing(false); setStatus("Provider saved"); load(); onChanged(); }
+    try {
+      await api.saveProvider(name, form); invalidateProviders(); invalidateModelCatalog(name);
+      setEditing(false); setStatus("Provider saved"); void load(true); onChanged();
+    }
     catch (error) { setStatus((error as Error).message); }
     finally { setBusy(false); }
   };
   const act = async (operation: () => Promise<unknown>, message: string) => {
     setBusy(true); setStatus("");
-    try { await operation(); setStatus(message); load(); onChanged(); }
+    try { await operation(); invalidateProviders(); invalidateModelCatalog(); setStatus(message); void load(true); onChanged(); }
     catch (error) { setStatus((error as Error).message); }
     finally { setBusy(false); }
   };

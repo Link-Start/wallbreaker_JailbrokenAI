@@ -78,3 +78,40 @@ def test_refresh_merges_remote_models(monkeypatch, tmp_path):
     result = client.post("/api/providers/router/models/refresh").json()
     assert result["fetched"] is True
     assert result["models"] == ["configured-model", "remote-a", "remote-b"]
+
+
+def test_normal_model_lookup_fetches_provider_only_once(monkeypatch, tmp_path):
+    cfg = _config(tmp_path)
+    calls = []
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"data": [{"id": "remote-model"}]}
+
+    class Client:
+        def __init__(self, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def get(self, url, headers):
+            calls.append(url)
+            return Response()
+
+    import httpx
+    monkeypatch.setattr(httpx, "AsyncClient", Client)
+    client = TestClient(create_app(config=cfg, sessions_dir=tmp_path / "sessions"))
+    first = client.get("/api/models", params={"profile": "router"}).json()
+    second = client.get("/api/models", params={"profile": "router"}).json()
+
+    assert calls == ["https://router.example/v1/models"]
+    assert first.get("cached") is not True
+    assert second["cached"] is True
+    assert second["models"] == ["configured-model", "remote-model"]

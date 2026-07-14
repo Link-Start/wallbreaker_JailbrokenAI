@@ -2,10 +2,12 @@ import type {
   AdvancedSettings,
   EndpointAdvancedSettings,
   ProfileDetail,
+  ProviderRecord,
   RuntimeAdvancedSettings,
   TypicalConfiguration,
 } from "../api";
 import { ModelChooser } from "./ModelChooser";
+import { ProviderChooser } from "./ProviderChooser";
 
 const DEFAULT_ENDPOINT: EndpointAdvancedSettings = {
   protocol: "openai",
@@ -185,6 +187,14 @@ export function AdvancedSettingsDrawer({
             title={label}
             value={value[id]}
             onChange={(key, next) => setEndpoint(id, key, next)}
+            onSelectProvider={(provider) => onChange(normalizeAdvancedSettings({
+              ...value,
+              [id]: {
+                ...value[id], protocol: provider.protocol, base_url: provider.base_url,
+                model: provider.model, api_key_env: provider.api_key_env,
+                auth_style: provider.auth_style, modality: provider.modality,
+              },
+            }))}
             modelProfile={endpointProfile(value[id], profileDetails, defaultProfile)}
             saving={saving}
           />
@@ -216,12 +226,14 @@ function EndpointSection({
   title,
   value,
   onChange,
+  onSelectProvider,
   modelProfile,
   saving,
 }: {
   title: string;
   value: EndpointAdvancedSettings;
   onChange: <K extends keyof EndpointAdvancedSettings>(key: K, value: EndpointAdvancedSettings[K]) => void;
+  onSelectProvider: (provider: ProviderRecord) => void;
   modelProfile: string;
   saving: boolean;
 }) {
@@ -229,6 +241,10 @@ function EndpointSection({
     <div className="advanced-section">
       <h3>{title}</h3>
       <div className="advanced-grid">
+        <div className="advanced-field">
+          <span>Provider</span>
+          <ProviderChooser value={modelProfile} ariaLabel={`${title} provider`} disabled={saving} onChange={(_next, provider) => { if (provider) onSelectProvider(provider); }} />
+        </div>
         <div className="advanced-field">
           <span>Model</span>
           <ModelChooser

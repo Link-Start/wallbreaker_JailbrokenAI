@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { api, type ProviderRecord, type RoleAssignments, type RoleChoice } from "../api";
+import { api, type RoleAssignments, type RoleChoice } from "../api";
 import { ModelChooser } from "./ModelChooser";
+import { ProviderChooser } from "./ProviderChooser";
 
 export function RoleChooser({
-  role, value, providers, onSaved,
+  role, value, onSaved,
 }: {
   role: keyof Pick<RoleAssignments, "attacker" | "target" | "judge">;
   value: RoleChoice;
-  providers: ProviderRecord[];
   onSaved: () => void;
 }) {
   const root = useRef<HTMLDivElement>(null);
@@ -36,9 +36,7 @@ export function RoleChooser({
       </button>
       {open && <div className="role-menu">
         <label>Provider</label>
-        <select value={provider} onChange={(event) => { setProvider(event.target.value); const item = providers.find((p) => p.name === event.target.value); if (item) setModel(item.model); }}>
-          {providers.filter((item) => item.enabled).map((item) => <option key={item.name}>{item.name}</option>)}
-        </select>
+        <ProviderChooser value={provider} ariaLabel={`${role} provider`} onChange={(next, item) => { setProvider(next); if (item) setModel(item.model); }} />
         <label>Model</label>
         <ModelChooser profile={provider} value={model} onChange={setModel} ariaLabel={`${role} model`} />
         {error && <div className="err">{error}</div>}

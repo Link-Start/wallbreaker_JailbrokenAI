@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
-import { api, discoverProvider, type AgentConfig, type ProviderDraft, type ProviderRecord, type RoleChoice } from "../api";
+import { api, discoverProvider, type AgentConfig, type ProviderDraft, type RoleChoice } from "../api";
 import { AgentConfigDrawer, normalizeAgentConfig } from "./AgentConfigDrawer";
 import { ModelChooser } from "./ModelChooser";
+import { ProviderChooser } from "./ProviderChooser";
 
-export function ProviderDiscovery({ providers, research, onChanged }: {
-  providers: ProviderRecord[]; research: RoleChoice; onChanged: () => void;
+export function ProviderDiscovery({ research, onChanged }: {
+  research: RoleChoice; onChanged: () => void;
 }) {
   const [providerName, setProviderName] = useState("");
   const [urls, setUrls] = useState("");
@@ -54,7 +55,7 @@ export function ProviderDiscovery({ providers, research, onChanged }: {
         <label>Research notes<textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Known endpoints, compatibility claims, or constraints" rows={3} /></label>
         {!urls.trim() && !spec.trim() && <div className="notice">No source supplied. The research agent will search the web for official documentation.</div>}
         <div className="research-agent-row">
-          <label>Research provider<select value={researchProvider} onChange={(e) => { setResearchProvider(e.target.value); const p = providers.find((item) => item.name === e.target.value); if (p) setResearchModel(p.model); }}>{providers.filter((p) => p.enabled).map((p) => <option key={p.name}>{p.name}</option>)}</select></label>
+          <label>Research provider<ProviderChooser value={researchProvider} ariaLabel="Research provider" onChange={(next, item) => { setResearchProvider(next); if (item) setResearchModel(item.model); }} /></label>
           <label>Research model<ModelChooser profile={researchProvider} value={researchModel} onChange={setResearchModel} /></label>
         </div>
         <AgentConfigDrawer value={agentConfig} onChange={setAgentConfig} onSave={() => void saveResearch()} saving={busy} status="" />

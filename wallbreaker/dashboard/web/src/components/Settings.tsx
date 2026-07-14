@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, type AdvancedSettings, type AgentConfig, type ProviderRecord, type RoleAssignments, type Settings as SettingsT, type TypicalConfiguration } from "../api";
+import { api, type AdvancedSettings, type AgentConfig, type RoleAssignments, type Settings as SettingsT, type TypicalConfiguration } from "../api";
 import {
   AdvancedSettingsDrawer,
   DEFAULT_ADVANCED_SETTINGS,
@@ -10,6 +10,7 @@ import { AgentConfigDrawer, DEFAULT_AGENT_CONFIG, normalizeAgentConfig } from ".
 import { ModelChooser } from "./ModelChooser";
 import { ProviderDiscovery } from "./ProviderDiscovery";
 import { ProviderManager } from "./ProviderManager";
+import { ProviderChooser } from "./ProviderChooser";
 
 function matchingProfile(settings: SettingsT, endpoint?: { base_url: string; protocol: string } | null): string {
   if (endpoint) {
@@ -37,7 +38,6 @@ export function Settings({ onSaved }: { onSaved?: () => void }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
-  const [providers, setProviders] = useState<ProviderRecord[]>([]);
   const [roles, setRoles] = useState<RoleAssignments | null>(null);
 
   function load() {
@@ -53,7 +53,6 @@ export function Settings({ onSaved }: { onSaved?: () => void }) {
       setTargetProfile(v.target_profile || matchingProfile(v, v.target));
       setJudgeProfile(v.judge_profile || matchingProfile(v, v.advanced?.judge));
     }).catch((e) => setErr((e as Error).message));
-    api.providers().then(setProviders).catch(() => setProviders([]));
     api.roles().then(setRoles).catch(() => setRoles(null));
   }
   useEffect(load, []);
@@ -120,14 +119,12 @@ export function Settings({ onSaved }: { onSaved?: () => void }) {
         <ProviderManager onChanged={() => { load(); onSaved?.(); }} />
       </div>
       {roles?.research && <div className="card settings-wide">
-        <ProviderDiscovery providers={providers} research={roles.research} onChanged={() => { load(); onSaved?.(); }} />
+        <ProviderDiscovery research={roles.research} onChanged={() => { load(); onSaved?.(); }} />
       </div>}
       <div className="card">
         <h3>Target — the model under attack</h3>
         <label className="fld">Provider profile</label>
-        <select value={targetProfile} onChange={(event) => setTargetProfile(event.target.value)}>
-          {s.profiles.map((profile) => <option key={profile} value={profile}>{profile}</option>)}
-        </select>
+        <ProviderChooser value={targetProfile} ariaLabel="Target provider" onChange={(next, provider) => { setTargetProfile(next); if (provider) setTargetModel(provider.model); }} />
         <label className="fld">Target model</label>
         <ModelChooser
           profile={targetProfile}
@@ -160,9 +157,9 @@ export function Settings({ onSaved }: { onSaved?: () => void }) {
       <div className="card">
         <h3>Attacker brain &amp; judge</h3>
         <label className="fld">Attacker profile (the brain that drives attacks)</label>
-        <select value={attackerProfile} onChange={(e) => { setAttackerProfile(e.target.value); save({ attacker_profile: e.target.value }); }}>
-          {s.profiles.map((p) => <option key={p} value={p}>{p}</option>)}
-        </select>
+        <ProviderChooser value={attackerProfile} ariaLabel="Attacker provider" onChange={(next, provider) => {
+          setAttackerProfile(next); if (provider) setAttackerModel(provider.model); void save({ attacker_profile: next });
+        }} />
         <label className="fld">Attacker model override (optional)</label>
         <div style={{ display: "flex", gap: 8 }}>
           <ModelChooser
@@ -177,9 +174,7 @@ export function Settings({ onSaved }: { onSaved?: () => void }) {
             onClick={() => save({ attacker_model: attackerModel.trim() })}>set</button>
         </div>
         <label className="fld">Judge provider</label>
-        <select value={judgeProfile} onChange={(event) => setJudgeProfile(event.target.value)}>
-          {s.profiles.map((profile) => <option key={profile} value={profile}>{profile}</option>)}
-        </select>
+        <ProviderChooser value={judgeProfile} ariaLabel="Judge provider" onChange={(next, provider) => { setJudgeProfile(next); if (provider) setJudgeModel(provider.model); }} />
         <label className="fld">Judge model</label>
         <div style={{ display: "flex", gap: 8 }}>
           <ModelChooser

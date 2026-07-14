@@ -920,6 +920,9 @@ def create_app(config=None, sessions_dir: str | Path = "sessions", web_dir: str 
         if config is None or name not in config.profiles:
             raise HTTPException(status_code=404, detail=f"unknown or disabled provider '{name}'")
         result = await _discover_profile_models(name, config.profiles[name])
+        if result["fetched"] and model_catalog is not None:
+            model_catalog.sync(name, result["models"], "remote")
+            result["refreshed_at"] = model_catalog.mark_refreshed(name)
         return {"ok": bool(result["fetched"]), **result}
 
     @app.get("/api/provider-spec/drafts")
@@ -1111,10 +1114,24 @@ def create_app(config=None, sessions_dir: str | Path = "sessions", web_dir: str 
             raise HTTPException(status_code=400, detail="no config loaded")
         if profile not in config.profiles:
             raise HTTPException(status_code=404, detail=f"unknown profile '{profile}'")
+        refreshed_at = model_catalog.last_refreshed(profile) if model_catalog is not None else ""
+        if refreshed_at:
+            entries = model_catalog.list(profile)
+            return {
+                "profile": profile,
+                "protocol": config.profiles[profile].protocol,
+                "models": [entry["model_id"] for entry in entries],
+                "entries": entries,
+                "fetched": True,
+                "cached": True,
+                "refreshed_at": refreshed_at,
+                "error": "",
+            }
         result = await _discover_profile_models(profile, config.profiles[profile])
         if model_catalog is not None:
             if result["fetched"]:
                 model_catalog.sync(profile, result["models"], "remote")
+                result["refreshed_at"] = model_catalog.mark_refreshed(profile)
             entries = model_catalog.list(profile)
             result["entries"] = entries
             result["models"] = [entry["model_id"] for entry in entries]
@@ -1144,6 +1161,7 @@ def create_app(config=None, sessions_dir: str | Path = "sessions", web_dir: str 
         result = await _discover_profile_models(name, config.profiles[name])
         if result["fetched"]:
             model_catalog.sync(name, result["models"], "remote")
+            result["refreshed_at"] = model_catalog.mark_refreshed(name)
         result["entries"] = model_catalog.list(name)
         result["models"] = [item["model_id"] for item in result["entries"]]
         return result

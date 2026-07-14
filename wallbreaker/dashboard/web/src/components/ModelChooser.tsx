@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, type ModelCatalog } from "../api";
-
-const catalogCache = new Map<string, ModelCatalog>();
+import type { ModelCatalog } from "../api";
+import { cachedModelCatalog, loadModelCatalog, rememberModel, subscribeModelCatalog } from "../dataCache";
 
 export function ModelChooser({
   value,
@@ -24,21 +23,19 @@ export function ModelChooser({
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
-  const [catalog, setCatalog] = useState<ModelCatalog | null>(() => catalogCache.get(profile) || null);
+  const [catalog, setCatalog] = useState<ModelCatalog | null>(() => cachedModelCatalog(profile));
   const [loading, setLoading] = useState(false);
   const [active, setActive] = useState(-1);
   const [query, setQuery] = useState("");
 
   const load = useCallback(async () => {
-    if (!profile || catalogCache.has(profile)) {
-      setCatalog(profile ? catalogCache.get(profile) || null : null);
+    if (!profile) {
+      setCatalog(null);
       return;
     }
     setLoading(true);
     try {
-      const result = await api.models(profile);
-      catalogCache.set(profile, result);
-      setCatalog(result);
+      setCatalog(await loadModelCatalog(profile));
     } catch (error) {
       setCatalog({
         profile,
@@ -53,10 +50,12 @@ export function ModelChooser({
   }, [profile]);
 
   useEffect(() => {
-    setCatalog(catalogCache.get(profile) || null);
+    setCatalog(cachedModelCatalog(profile));
     setActive(-1);
     if (open) void load();
   }, [profile, open, load]);
+
+  useEffect(() => subscribeModelCatalog(profile, setCatalog), [profile]);
 
   useEffect(() => {
     const close = (event: MouseEvent) => {
@@ -94,7 +93,10 @@ export function ModelChooser({
   };
   const commitCustom = () => {
     const model = value.trim();
-    if (model) onCommit?.(model);
+    if (model) {
+      void rememberModel(profile, model).catch(() => undefined);
+      onCommit?.(model);
+    }
     setOpen(false);
   };
 

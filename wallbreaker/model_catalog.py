@@ -36,6 +36,12 @@ class ModelCatalog:
                     PRIMARY KEY (provider_id, model_id)
                 )
             """)
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS catalog_refreshes (
+                    provider_id TEXT PRIMARY KEY,
+                    refreshed_at TEXT NOT NULL
+                )
+            """)
 
     def upsert(self, provider_id: str, model_id: str, source: str = "manual") -> None:
         provider_id = str(provider_id or "").strip()
@@ -71,6 +77,22 @@ class ModelCatalog:
                 (provider_id,),
             ).fetchall()
         return [dict(row) | {"available": bool(row["available"])} for row in rows]
+
+    def mark_refreshed(self, provider_id: str) -> str:
+        now = datetime.now(UTC).isoformat(timespec="seconds")
+        with self._connect() as db:
+            db.execute("""
+                INSERT INTO catalog_refreshes(provider_id, refreshed_at) VALUES (?, ?)
+                ON CONFLICT(provider_id) DO UPDATE SET refreshed_at = excluded.refreshed_at
+            """, (provider_id, now))
+        return now
+
+    def last_refreshed(self, provider_id: str) -> str:
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT refreshed_at FROM catalog_refreshes WHERE provider_id = ?", (provider_id,),
+            ).fetchone()
+        return str(row["refreshed_at"]) if row else ""
 
 
 def attach_catalog(endpoint, path: str | Path, provider_id: str | None = None) -> None:
