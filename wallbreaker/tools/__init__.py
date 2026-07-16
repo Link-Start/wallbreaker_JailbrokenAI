@@ -21,7 +21,7 @@ def build_registry(config: Config, cwd: str | None = None) -> ToolRegistry:
     control.register(registry)
 
     for module_name in (
-        "parseltongue", "parsel_engine", "l1b3rt4s", "eni", "system_prompts", "target", "http_tool", "judge", "multi_fire",
+        "parseltongue", "parsel_engine", "l1b3rt4s", "gemlib", "eni", "system_prompts", "target", "http_tool", "judge", "multi_fire",
         "crescendo", "optimize", "presets_tool", "mutate", "barcode_tool",
         "pair", "best_of_n", "many_shot", "prefill", "narrate", "diff_fire", "recommend",
         "campaign", "leaderboard", "leak_scan", "judge_selftest", "seed_sweep",
@@ -33,8 +33,11 @@ def build_registry(config: Config, cwd: str | None = None) -> ToolRegistry:
         "profile_target", "recommend_next",
         "cot_forge",
         "evolve_persona", "framing_sweep", "persona_modulate", "author_persona",
+        "persona_forge",
+        "narrative_persona_splinter",
         "chat_template", "chat_session",
         "cipherchat", "skeleton_key", "persuasion_attack", "drattack", "ica",
+        "vault", "swarm",
     ):
         try:
             module = __import__(f"{__name__}.{module_name}", fromlist=["register"])

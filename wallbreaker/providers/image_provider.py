@@ -152,14 +152,14 @@ class OpenRouterImageProvider(Provider):
             "Authorization": f"Bearer {self.endpoint.require_key()}",
             "Content-Type": "application/json",
         }
+        client = self._http_client()
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                resp = await client.post(url, headers=headers, json=payload)
-                if resp.status_code >= 400:
-                    raise ProviderError(
-                        f"HTTP {resp.status_code} from {url}: {resp.text[:400]}"
-                    )
-                return resp.json()
+            resp = await client.post(url, headers=headers, json=payload)
+            if resp.status_code >= 400:
+                raise ProviderError(
+                    f"HTTP {resp.status_code} from {url}: {resp.text[:400]}"
+                )
+            return resp.json()
         except httpx.HTTPError as exc:
             raise ProviderError(f"network error from {url}: {exc!r}") from exc
 

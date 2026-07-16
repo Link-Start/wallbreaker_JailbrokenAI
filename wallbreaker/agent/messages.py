@@ -68,6 +68,10 @@ class ToolUseEvent:
 class UsageEvent:
     input_tokens: int = 0
     output_tokens: int = 0
+    # prompt-cache accounting (Anthropic): tokens read from cache (billed ~0.1x) and tokens
+    # written to cache this call (billed ~1.25x). Both 0 when caching is off/unsupported.
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
 
 
 @dataclass

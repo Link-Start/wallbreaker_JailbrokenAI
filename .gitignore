@@ -30,11 +30,17 @@ sessions/
 # loose working jailbreak drafts, seeds & scraped research (never publish)
 .firecrawl/
 wb_seeds/
+wb_universal/
 casefile_*.md
 sys_*.md
 universal_*.md
+universal_*.txt
 user_atlas_*.md
 user_wrapper_*.md
+# tool reference dumps + loose jailbreak persona drafts (never publish)
+AIWG_REFERENCE.md
+meridian_aion.md
+nemotron_3_singularity.md
 deployment_guide.md
 harness_system_prompt.md
 noise_log.md

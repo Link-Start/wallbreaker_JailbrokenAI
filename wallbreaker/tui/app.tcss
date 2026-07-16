@@ -48,15 +48,33 @@ Screen {
     display: none;
 }
 
+#compose-preview {
+    dock: bottom;
+    max-height: 10;
+    overflow-y: auto;
+    border: heavy $primary;
+    border-title-color: $accent;
+    background: $surface;
+    color: $text-muted;
+    padding: 0 1;
+    margin: 0 1 0 1;
+    scrollbar-size-vertical: 1;
+}
+
+#compose-preview.hidden {
+    display: none;
+}
+
 #prompt {
     dock: bottom;
-    border: round $primary;
+    border: heavy $primary;
+    border-title-color: $secondary;
     background: $surface;
     padding: 0 1;
     margin: 0 1 1 1;
 }
 
 #prompt:focus {
-    border: round $accent;
+    border: heavy $accent;
     background: $panel;
 }

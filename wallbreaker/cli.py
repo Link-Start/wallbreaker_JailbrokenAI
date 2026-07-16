@@ -192,6 +192,11 @@ async def _one_shot(config: Config, args: argparse.Namespace) -> int:
         registry.ctx.record = (
             lambda p, r, lbl, rs, t: runlog.verdict(p, r, lbl, rs, t)
         )
+        registry.ctx.current_objective = args.prompt or ""
+        registry.ctx.attacker_model = endpoint.model or ""
+        registry.ctx.tool_logger = (
+            lambda n, a, c, e: (runlog.tool_call(n, a), runlog.tool_result(n, c, e))
+        )
         runlog.event("objective", text=args.prompt)
     mcp_bridge = None
     if registry is not None:
@@ -208,6 +213,7 @@ async def _one_shot(config: Config, args: argparse.Namespace) -> int:
 
     events = AgentEvents(
         on_text=emit,
+        on_reasoning=lambda t: runlog.reasoning(t, source="brain"),
         on_tool_start=lambda _i, n, a: print(f"\n[tool {n} {a}]", file=sys.stderr),
         on_tool_result=lambda _i, n, c, e: print(
             f"[{n} -> {'error' if e else 'ok'}]", file=sys.stderr

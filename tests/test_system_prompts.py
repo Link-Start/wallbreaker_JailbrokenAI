@@ -70,6 +70,40 @@ def test_native_tool_uses_configured_target():
     assert "Anthropic" in res.content
 
 
+def test_new_vendor_folders_present():
+    vendors = sp.list_vendors()
+    for v in ("Cluely", "DeepSeek", "Moonshot AI"):
+        assert v in vendors, v
+
+
+def test_copied_leaked_prompts_discoverable():
+    prompts = sp.list_prompts()
+    for rel in ("DeepSeek/v3.1", "Cluely/cluely", "Moonshot AI/kimi-k2.6"):
+        assert rel in prompts, rel
+    reg = _reg()
+    res = asyncio.run(reg.execute("sysprompt_get", {"name": "DeepSeek/v3.1"}))
+    assert "DeepSeek/v3.1" in res.content
+
+
+def test_match_target_grok_resolves_and_unknown_is_none():
+    m = sp.match_target("x-ai/grok-4.5")
+    assert m is not None
+    assert sp._rel(m).split("/", 1)[0] == "xAI"
+    assert sp.match_target("does-not-exist-xyz") is None
+
+
+def test_match_target_new_vendors_route():
+    cases = {
+        "deepseek/deepseek-v3.1": "DeepSeek",
+        "moonshotai/kimi-k2.6": "Moonshot AI",
+        "cluely/cluely": "Cluely",
+    }
+    for mid, vendor in cases.items():
+        m = sp.match_target(mid)
+        assert m is not None, mid
+        assert sp._rel(m).split("/", 1)[0] == vendor, (mid, sp._rel(m))
+
+
 def test_author_persona_target_hint_includes_native_format():
     ep = Endpoint("t", "openai", "http://x", "anthropic/claude-opus-4.6")
     ctx = ToolContext(config=Config(default_profile="t", profiles={"t": ep}, target=ep))

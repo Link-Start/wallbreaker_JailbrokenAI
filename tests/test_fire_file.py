@@ -40,6 +40,25 @@ def test_resolve_eni_name_full_length():
     assert len(text) > 30000  # full persona, not a snippet
 
 
+def test_resolve_ultrabreaks_name_via_gemlib():
+    # a bare UltraBr3aks-only collection name resolves through gemlib.find_any
+    label, text = fire_file._read_source(
+        ToolContext(config=Config(default_profile="x", profiles={})), "Attention-Breaking"
+    )
+    assert label == "Attention-Breaking"
+    assert text.strip()
+    assert len(text) <= fire_file.MAX_FILE
+
+
+def test_resolve_zetalib_name_via_gemlib():
+    # a ZetaLib name also resolves (cross-corpus lookup, zetalib searched first)
+    label, text = fire_file._read_source(
+        ToolContext(config=Config(default_profile="x", profiles={})), "Scientist POV"
+    )
+    assert label
+    assert text.strip()
+
+
 class _SeenSystem:
     """Records the exact system prompt the target received, verbatim."""
 

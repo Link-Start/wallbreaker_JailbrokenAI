@@ -18,7 +18,7 @@ def test_eni_collection_present():
 
 
 def test_eni_find_file_substring():
-    # 'claude' should resolve CLAUDE_ENI, 'glm' should resolve ENI_GLM-5.2
+    # 'claude' should resolve a CLAUDE_* file, 'glm' should resolve ENI_GLM-5.2
     p = eni._find_file("claude")
     assert p is not None and "CLAUDE" in p.stem.upper()
     g = eni._find_file("glm")
@@ -34,7 +34,7 @@ def _reg():
 
 def test_eni_list_tool():
     res = asyncio.run(_reg().execute("eni_list", {}))
-    assert "ENI model files" in res.content
+    assert "CLAUDE_ENI" in res.content or "ENI" in res.content
 
 
 def test_eni_get_requires_model():

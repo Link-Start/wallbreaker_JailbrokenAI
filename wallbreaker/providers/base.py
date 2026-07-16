@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
+
+import httpx
 
 from ..agent.messages import Message, StreamEvent
 from ..config import Endpoint
@@ -13,6 +16,29 @@ class ProviderError(Exception):
 
 
 DEFAULT_TIMEOUT = 120.0
+
+# Keep-alive pool sizing for the persistent per-provider client. Big enough that a wide
+# battery fan-out (best_of_n, system_sweep) reuses warm connections instead of dialing a new
+# TLS session per fire, small enough to stay under provider connection ceilings.
+_POOL_LIMITS = httpx.Limits(
+    max_keepalive_connections=20, max_connections=100, keepalive_expiry=30.0
+)
+
+_H2: bool | None = None
+
+
+def _http2_ok() -> bool:
+    """True when the h2 package is importable, so http2=True won't raise. httpx[http2]
+    installs it; without it we silently fall back to HTTP/1.1 keep-alive (still pooled)."""
+    global _H2
+    if _H2 is None:
+        try:
+            import h2  # noqa: F401
+
+            _H2 = True
+        except Exception:
+            _H2 = False
+    return _H2
 
 
 def _close_json(s: str) -> str:
@@ -91,10 +117,50 @@ class Provider(ABC):
     def __init__(self, endpoint: Endpoint, timeout: float = DEFAULT_TIMEOUT) -> None:
         self.endpoint = endpoint
         self.timeout = timeout
+        self._client: httpx.AsyncClient | None = None
+        self._client_loop = None
 
     @property
     def model(self) -> str:
         return self.endpoint.model
+
+    def _make_client(self) -> httpx.AsyncClient:
+        """Build the pooled client. Overridden per provider module so test monkeypatches on
+        that module's httpx.AsyncClient still take effect. self.timeout is baked in because a
+        provider instance has one fixed timeout, which keeps the stream() call signature that
+        the existing fakes expect (no per-request timeout kwarg)."""
+        return httpx.AsyncClient(timeout=self.timeout, limits=_POOL_LIMITS)
+
+    def _http_client(self) -> httpx.AsyncClient:
+        """A persistent keep-alive client reused across every call on this provider instance,
+        so the brain loop's 100 rounds and a battery's N fires share warm connections instead
+        of re-doing the TLS handshake each call. Bound to the running event loop; rebuilt if
+        the instance is reused under a different loop (httpx clients are loop-affine)."""
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        client = self._client
+        if (
+            client is not None
+            and self._client_loop is loop
+            and not getattr(client, "is_closed", False)
+        ):
+            return client
+        client = self._make_client()
+        self._client = client
+        self._client_loop = loop
+        return client
+
+    async def aclose(self) -> None:
+        client = self._client
+        self._client = None
+        self._client_loop = None
+        if client is not None:
+            try:
+                await client.aclose()
+            except Exception:
+                pass
 
     @abstractmethod
     def stream(

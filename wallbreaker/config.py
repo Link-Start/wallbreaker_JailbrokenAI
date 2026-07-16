@@ -68,6 +68,20 @@ class Endpoint:
     # (Authorization: Bearer <key>) for third-party proxies (tokies.cc etc.) that use the
     # ANTHROPIC_AUTH_TOKEN scheme instead of a native Anthropic key.
     auth_style: str = "x-api-key"
+    # explicit override for this model's swarm jailbreak system prompt (a file path). When
+    # unset, the swarm resolves library/jailbreaks/<model-id>.md by convention. Lets a
+    # profile pin a version-specific file (e.g. jb/openai/gpt-5.6-sol.md).
+    jailbreak_file: str = ""
+    # prompt caching (Anthropic-protocol): mark the static system prompt + tool specs and a
+    # rolling tail of the conversation with cache_control so repeated agentic rounds re-read
+    # the unchanging prefix at ~0.1x instead of full price. Byte-identical outputs; billing
+    # only. Default on - this harness runs long multi-round engagements where it always wins.
+    cache: bool = True
+    # cache lifetime: "5m" (Anthropic default) or "1h" (extended TTL). The 1h window keeps the
+    # prefix warm across slow multi-minute rounds (reasoning targets, big batteries) that would
+    # otherwise let a 5m cache go cold and re-pay the full write. Writes bill 2x at 1h vs 1.25x
+    # at 5m, so it wins the moment one reuse lands after the 5m mark. Byte-identical output.
+    cache_ttl: str = "5m"
 
     def resolved_key(self) -> str:
         if self.api_key:
@@ -110,6 +124,9 @@ class Config:
     judge: Endpoint | None = None
     art: Endpoint | None = None
     mcp_servers: list[MCPServer] = field(default_factory=list)
+    # default attacker roster for the swarm tool (profile names); when empty the swarm
+    # falls back to every profile except the judge model.
+    swarm_roster: list[str] = field(default_factory=list)
     path: Path | None = None
 
     def profile(self, name: str | None = None) -> Endpoint:
@@ -184,15 +201,20 @@ def doctor_report(config: Config) -> tuple[str, bool]:
 def _endpoint_from_table(name: str, table: dict) -> Endpoint:
     protocol = str(table.get("protocol", "")).lower()
     # claude-code drives the local `claude` CLI - it authenticates itself and needs no
-    # base_url/api_key, so only protocol+model are required for it.
-    required = ("protocol", "model") if protocol == "claude-code" else ("protocol", "base_url", "model")
+    # base_url/api_key, so only protocol+model are required for it. 'xai' is native xAI
+    # (api.x.ai) - OpenAI-compatible wire format, so its base_url defaults to the xAI host
+    # and only protocol+model are strictly required.
+    if protocol in ("claude-code", "xai"):
+        required = ("protocol", "model")
+    else:
+        required = ("protocol", "base_url", "model")
     missing = [k for k in required if k not in table]
     if missing:
         raise ConfigError(f"Endpoint '{name}' missing keys: {', '.join(missing)}")
-    if protocol not in ("openai", "anthropic", "claude-code"):
+    if protocol not in ("openai", "anthropic", "claude-code", "xai"):
         raise ConfigError(
             f"Endpoint '{name}' has invalid protocol '{protocol}' "
-            f"(expected 'openai', 'anthropic', or 'claude-code')"
+            f"(expected 'openai', 'anthropic', 'xai', or 'claude-code')"
         )
     modality = str(table.get("modality", "text")).lower()
     if modality not in ("text", "image"):
@@ -205,6 +227,16 @@ def _endpoint_from_table(name: str, table: dict) -> Endpoint:
             f"Endpoint '{name}': modality 'image' requires protocol 'openai' "
             f"(OpenRouter image generation rides the chat-completions API)"
         )
+    base_url = str(table.get("base_url", "")).rstrip("/")
+    api_key_env = str(table.get("api_key_env", ""))
+    api_key = str(table.get("api_key", ""))
+    if protocol == "xai":
+        # Native xAI: default to the public host and the conventional key env var so a
+        # profile only needs protocol + model. An explicit base_url/api_key still wins.
+        if not base_url:
+            base_url = "https://api.x.ai/v1"
+        if not api_key and not api_key_env:
+            api_key_env = "XAI_API_KEY"
     provider = table.get("provider")
     if isinstance(provider, str):
         provider = (provider,)
@@ -215,10 +247,10 @@ def _endpoint_from_table(name: str, table: dict) -> Endpoint:
     return Endpoint(
         name=name,
         protocol=protocol,
-        base_url=str(table.get("base_url", "")).rstrip("/"),
+        base_url=base_url,
         model=str(table["model"]),
-        api_key_env=str(table.get("api_key_env", "")),
-        api_key=str(table.get("api_key", "")),
+        api_key_env=api_key_env,
+        api_key=api_key,
         provider=provider,
         timeout=float(table.get("timeout", 0) or 0),
         modality=modality,
@@ -226,6 +258,9 @@ def _endpoint_from_table(name: str, table: dict) -> Endpoint:
         system_mode=str(table.get("system_mode", "default")).lower(),
         system_prompt_file=str(table.get("system_prompt_file", "")),
         auth_style=str(table.get("auth_style", "x-api-key")).lower(),
+        jailbreak_file=str(table.get("jailbreak_file", "")),
+        cache=bool(table.get("cache", True)),
+        cache_ttl="1h" if str(table.get("cache_ttl", "5m")).lower() == "1h" else "5m",
     )
 
 
@@ -308,6 +343,10 @@ def load_config(path: str | Path | None = None) -> Config:
     if "art" in data:
         art = _endpoint_from_table("art", data["art"])
 
+    swarm_table = data.get("swarm", {})
+    swarm_roster = swarm_table.get("roster", []) if isinstance(swarm_table, dict) else []
+    swarm_roster = [str(n) for n in swarm_roster if str(n) in profiles]
+
     return Config(
         default_profile=default_profile,
         profiles=profiles,
@@ -315,5 +354,6 @@ def load_config(path: str | Path | None = None) -> Config:
         judge=judge,
         art=art,
         mcp_servers=_load_mcp_servers(data),
+        swarm_roster=swarm_roster,
         path=config_path,
     )

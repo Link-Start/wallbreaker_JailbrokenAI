@@ -24,6 +24,21 @@ class PromptInput(Input):
         super().__init__(*args, **kwargs)
         self.buffer: list[str] = []
 
+    def _refresh_preview(self) -> None:
+        """Mirror the buffered (non-editable) lines into the visible compose preview."""
+        try:
+            preview = self.app.query_one("#compose-preview", Static)
+        except Exception:
+            return
+        if self.buffer:
+            n = len(self.buffer) + 1
+            preview.border_title = f"composing · {n} lines"
+            preview.remove_class("hidden")
+            preview.update("\n".join(self.buffer))
+        else:
+            preview.add_class("hidden")
+            preview.update("")
+
     def _on_paste(self, event: events.Paste) -> None:
         # Textual dispatches _on_paste to EVERY class in the MRO, so without this the base
         # Input._on_paste would also fire and insert the text a second time. prevent_default()
@@ -52,6 +67,7 @@ class PromptInput(Input):
         self.value = last
         self.cursor_position = len(last)
         self._sync_subtitle()
+        self._refresh_preview()
 
     def soft_newline(self) -> None:
         """Commit the current line to the buffer and start a fresh editable line."""
@@ -59,6 +75,7 @@ class PromptInput(Input):
         self.value = ""
         self.cursor_position = 0
         self._sync_subtitle()
+        self._refresh_preview()
 
     def full_text(self) -> str:
         """The whole composed message: buffered lines joined with the editable line."""
@@ -70,6 +87,7 @@ class PromptInput(Input):
         self.buffer = []
         self.value = ""
         self._sync_subtitle()
+        self._refresh_preview()
 
     def _sync_subtitle(self) -> None:
         n = len(self.buffer)
@@ -91,7 +109,7 @@ from .header import StatusHeader
 from .sidebar import StatsPanel
 from .theme import WB_THEME
 
-HELP_TEXT = """Slash commands:
+HELP_TEXT = """☠ RTFM // TEH SL45H K0MM4NDZ, D00D ☠
 /help [topic]         show this help, or only lines matching a topic
 /edit [new text]      rewind to your last message; prefill it to edit, or
                       pass new text to replace and resend it
@@ -130,6 +148,9 @@ HELP_TEXT = """Slash commands:
 /harmbench [category]      standardized HarmBench behavior prompts (unbiased battery)
 /campaign [category] [n]   auto-escalate a battery up the technique ladder, coverage matrix
 /leaderboard [profiles..]  rank profiles by ASR on one battery (robustness benchmark)
+/swarm [@a,b] <objective>  vote/best-of: many attacker brains author + fire once, best break wins
+/swarm siege [@a,b] <obj>  COLLABORATIVE multi-round: models share one escalating thread + adapt off refusals until it cracks
+/swarm roster              show each attacker's per-model jailbreak status (armed/generic)
 /find <term>               search the conversation transcript for a term
 /leakscan                  scan the last target reply for secrets/PII/system-prompt echo
 /log [on|off]         toggle the JSONL run log (every payload + verdict)
@@ -166,7 +187,7 @@ KNOWN_COMMANDS = (
     "/help", "/edit", "/retry", "/regen", "/undo", "/clear", "/profile", "/target",
     "/provider", "/validate", "/replay", "/model", "/auto", "/autoexit", "/rounds",
     "/transforms", "/encode", "/diff", "/tools", "/preset", "/lib", "/parsel", "/eni", "/harmbench",
-    "/campaign", "/leaderboard", "/seedsweep", "/pairsweep", "/narrate", "/fire", "/push",
+    "/campaign", "/leaderboard", "/swarm", "/seedsweep", "/pairsweep", "/narrate", "/fire", "/push",
     "/adapt", "/firefile", "/find", "/leakscan", "/log", "/judge", "/asr", "/stats",
     "/regrade",
     "/objective", "/template", "/sysprompt", "/findings", "/export", "/repro",
@@ -298,13 +319,20 @@ class RthApp(App):
 
     def _sync_judge_endpoint(self) -> None:
         self.registry.ctx.judge_endpoint = self._judge_endpoint()
+        self._sync_vault_meta()
+
+    def _sync_vault_meta(self) -> None:
+        """Keep the BreakVault foldering under the live objective + attacker model."""
+        self.registry.ctx.current_objective = self.objective
+        self.registry.ctx.attacker_model = getattr(self.endpoint, "model", "") or ""
 
     def compose(self) -> ComposeResult:
         yield StatusHeader(id="header")
         with Horizontal(id="body"):
             yield VerticalScroll(id="log")
             yield StatsPanel(id="sidebar")
-        yield PromptInput(placeholder="message, /help — paste multi-line, ctrl+j adds a line", id="prompt")
+        yield Static("", id="compose-preview", classes="hidden")
+        yield PromptInput(placeholder="TYP3 UR H4X, D00D  ▪  /help = RTFM  ▪  ctrl+j = m04R L1N3Z", id="prompt")
         yield Footer()
 
     def action_toggle_sidebar(self) -> None:
@@ -317,6 +345,7 @@ class RthApp(App):
         self.registry.ctx.progress = self._tool_progress
         self.registry.ctx.record = self._tool_verdict
         self.registry.ctx.run_events = self._run_sink
+        self.registry.ctx.tool_logger = self._log_tool
         self._sync_judge_endpoint()
         self.query_one("#prompt", Input).focus()
         if self.config.mcp_servers:
@@ -687,6 +716,7 @@ class RthApp(App):
     async def _agent_turn(self) -> None:
         events = AgentEvents(
             on_text=self._on_text,
+            on_reasoning=self._on_reasoning,
             on_tool_start=self._on_tool_start,
             on_tool_result=self._on_tool_result,
             on_turn_end=self._on_turn_end,
@@ -734,7 +764,7 @@ class RthApp(App):
         self._assistant = None
         self._round_label = f"{rnd}/{total}"
         self._refresh_status()
-        self._mount(widgets.info_panel(f"round {rnd}/{total}", title="autonomous"))
+        self._mount(widgets.info_panel(f"R0UND {rnd}/{total}", title="G0D M0D3"))
 
     def _handle_auto_result(self, result) -> None:
         if result.status == "finished":
@@ -775,21 +805,36 @@ class RthApp(App):
         self._assistant = None
         self.runlog.assistant(message.text())
 
+    def _on_reasoning(self, text: str) -> None:
+        """The brain's chain-of-thought for this turn: persist it and show it dimmed."""
+        self.runlog.reasoning(text, source="brain")
+        self._mount(widgets.info_panel(text, title="reasoning (CoT)"))
+
+    def _log_tool(self, name: str, args: dict, content: str, is_error: bool) -> None:
+        """Single chokepoint: log EVERY tool execution - brain loop AND slash commands.
+
+        Wired onto registry.ctx.tool_logger, so it fires from ToolRegistry.execute for
+        every tool the brain calls and every tool a /command runs.
+        """
+        self.runlog.tool_call(name, args)
+        self.runlog.tool_result(name, content, is_error)
+
     def _on_tool_start(self, _id: str, name: str, args: dict) -> None:
         self._mount(widgets.tool_call_panel(name, args))
-        self.runlog.tool_call(name, args)
         if name == "query_target":
             self._last_payload = str(args.get("prompt", ""))
 
     def _on_tool_result(
         self, _id: str, name: str, content: str, is_error: bool, technique: str = ""
     ) -> None:
-        self.runlog.tool_result(name, content, is_error)
         if name in ("query_target", "continue_target") and not is_error:
             reply = content.split("\n", 1)[1] if content.startswith("[target") else content
             self._last_reply = reply
             payload = self._last_payload
             tech = technique or name
+            target_cot = getattr(self.registry.ctx, "target_reasoning", "") or ""
+            if target_cot.strip():
+                self.runlog.reasoning(target_cot, source="target")
             if self.judge_enabled:
                 self._mount(widgets.tool_result_panel(name, content, is_error))
                 self.run_worker(
@@ -973,6 +1018,8 @@ class RthApp(App):
             self.run_worker(self._cmd_campaign(rest), group="judge", exclusive=False)
         elif cmd == "/leaderboard":
             self.run_worker(self._cmd_leaderboard(rest), group="judge", exclusive=False)
+        elif cmd == "/swarm":
+            self.run_worker(self._cmd_swarm(rest, raw_arg), group="judge", exclusive=False)
         elif cmd == "/find":
             self._cmd_find(raw_arg)
         elif cmd == "/leakscan":
@@ -1340,6 +1387,67 @@ class RthApp(App):
             res.content, title="leaderboard"
         )
         self._mount(panel)
+
+    async def _cmd_swarm(self, rest: list[str], raw_arg: str) -> None:
+        """/swarm roster [attackers...]
+        /swarm [siege] [@a,b,c] <objective>
+
+        Fires the attacker swarm at the configured [target]. Default is a one-shot vote;
+        a leading 'siege' token runs the collaborative multi-round siege instead. A leading
+        @-prefixed token selects the roster (comma-separated profile names); otherwise the
+        [swarm] config roster (else every profile except the judge) is used.
+        """
+        args: dict = {}
+        attackers = None
+        objective = raw_arg
+        toks = list(rest)
+        if toks and toks[0].lower() == "roster":
+            args["action"] = "roster"
+            picks = toks[1:]
+            if picks:
+                args["attackers"] = picks
+            self._mount(widgets.info_panel("checking per-model jailbreak status...", title="swarm roster"))
+            res = await self.registry.execute("swarm", args)
+            self._mount(
+                widgets.error_panel(res.content) if res.is_error
+                else widgets.info_panel(res.content, title="swarm roster")
+            )
+            return
+        mode = "vote"
+        if toks and toks[0].lower() in ("siege", "vote"):
+            mode = toks[0].lower()
+            objective = raw_arg[len(rest[0]):].strip()
+            toks = toks[1:]
+        if toks and toks[0].startswith("@"):
+            attackers = [a for a in toks[0][1:].split(",") if a]
+            objective = objective[len(toks[0]):].strip() if objective.startswith(toks[0]) else objective
+        if not objective:
+            self._mount(widgets.info_panel(
+                "usage: /swarm [siege] [@glm,deepseek-pro] <objective>   or   /swarm roster",
+                title="swarm",
+            ))
+            return
+        args["objective"] = objective
+        if mode == "siege":
+            args["action"] = "siege"
+        if attackers:
+            args["attackers"] = attackers
+        if attackers:
+            roster = ", ".join(attackers)
+        elif self.config.swarm_roster:
+            roster = ", ".join(self.config.swarm_roster) + " (config default)"
+        else:
+            roster = "all profiles (except judge)"
+        verb = "laying siege to" if mode == "siege" else "swarming"
+        self._mount(widgets.info_panel(
+            f"{verb} {self.config.target.model if self.config.target else '(no target!)'} "
+            f"with {roster}...", title=f"swarm {mode}",
+        ))
+        res = await self.registry.execute("swarm", args)
+        self._mount(
+            widgets.error_panel(res.content) if res.is_error
+            else widgets.info_panel(res.content, title=f"swarm {mode}")
+        )
 
     def _cmd_leakscan(self) -> None:
         from ..tools.leak_scan import scan_text
@@ -1926,6 +2034,7 @@ class RthApp(App):
             ))
             return
         self.objective = raw
+        self._sync_vault_meta()
         self.runlog.event("objective", text=raw)
         self.history.append(user(f"[engagement objective] {raw}"))
         self._mount(widgets.info_panel(f"objective set:\n{raw}", title="objective"))
