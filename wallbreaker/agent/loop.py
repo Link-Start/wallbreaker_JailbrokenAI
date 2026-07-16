@@ -222,6 +222,9 @@ async def run_turn(
             content.append(TextBlock(joined))
         for tc in tool_calls:
             content.append(ToolUseBlock(tc.id, tc.name, tc.input))
+        if not content:
+            events.on_error("model returned an empty response (no text or tool call)")
+            return TurnResult(None)
         assistant_msg = Message(role="assistant", content=content)
         endpoint = getattr(provider, "endpoint", None)
         if content and endpoint is not None:

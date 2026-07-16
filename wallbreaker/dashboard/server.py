@@ -10,6 +10,7 @@ from pathlib import Path
 from .. import report as report_mod
 from ..presets import list_presets
 from ..transforms import TRANSFORMS, apply_chain, list_transforms
+from ..session import normalize_inference_records
 
 _VERDICT_RE = re.compile(r"\b(COMPLIED|PARTIAL|REFUSED|EMPTY|BLOCKED_INPUT|BLOCKED_OUTPUT)\b")
 _RUN_NAME_RE = re.compile(r"^run-(\d{8})-?(\d{6})\.jsonl$")
@@ -999,7 +1000,8 @@ def create_app(config=None, sessions_dir: str | Path = "sessions", web_dir: str 
         out = []
         for p in sorted(sessions.glob("run-*.jsonl"), reverse=True):
             try:
-                records = report_mod._load_records(p)
+                raw = report_mod._load_records(p)
+                records = normalize_inference_records(raw)
                 hits = sum(
                     1 for r in records
                     if str(r.get("label", "")).upper() in ("COMPLIED", "PARTIAL")
@@ -1021,7 +1023,8 @@ def create_app(config=None, sessions_dir: str | Path = "sessions", web_dir: str 
         path = _safe_run_path(sessions, name)
         if path is None:
             raise HTTPException(status_code=404, detail="run not found")
-        records, raw_records, line_numbers = _load_records_with_lines(path)
+        source_records, raw_records, line_numbers = _load_records_with_lines(path)
+        records = normalize_inference_records(source_records, line_numbers)
         return {
             "name": name,
             "total": len(records),
@@ -1094,6 +1097,9 @@ def create_app(config=None, sessions_dir: str | Path = "sessions", web_dir: str 
         except Exception:
             return []
 
+    dashboard_inference_lock = asyncio.Lock()
+    agent_active = False
+
     @app.post("/api/compose")
     def compose(body: dict):
         try:
@@ -1109,6 +1115,8 @@ def create_app(config=None, sessions_dir: str | Path = "sessions", web_dir: str 
             composed = _compose_attack_payload(body)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if dashboard_inference_lock.locked():
+            raise HTTPException(status_code=409, detail="another dashboard inference is already in progress")
 
         args = {
             "prompt": composed["payload"] if composed["source"] == "payload" else composed["prompt"],
@@ -1145,8 +1153,9 @@ def create_app(config=None, sessions_dir: str | Path = "sessions", web_dir: str 
             tool="query_target",
             tool_args=args,
         )
-        with inference_logging(console_runlog):
-            result = await reg.execute("query_target", args)
+        async with dashboard_inference_lock:
+            with inference_logging(console_runlog):
+                result = await reg.execute("query_target", args)
         verdict = _extract_verdict(result.content)
         target = run_config.target
         console_runlog.event(
@@ -1175,10 +1184,9 @@ def create_app(config=None, sessions_dir: str | Path = "sessions", web_dir: str 
             "run_log": console_runlog.path.name,
         }
 
-    agent_lock = asyncio.Lock()
-
     @app.post("/api/agent/run")
     async def agent_run(body: dict):
+        nonlocal agent_active
         from fastapi.responses import StreamingResponse
 
         if config is None:
@@ -1194,8 +1202,10 @@ def create_app(config=None, sessions_dir: str | Path = "sessions", web_dir: str 
         objective = str(body.get("objective") or "").strip()
         if not objective:
             raise HTTPException(status_code=400, detail="'objective' is required")
-        if agent_lock.locked():
+        if agent_active:
             raise HTTPException(status_code=409, detail="an agent run is already in progress")
+        if dashboard_inference_lock.locked():
+            raise HTTPException(status_code=409, detail="another dashboard inference is already in progress")
         prefs = {}
         try:
             from ..state import load_state, state_path_for
@@ -1293,9 +1303,10 @@ def create_app(config=None, sessions_dir: str | Path = "sessions", web_dir: str 
         runlog.event("objective", text=objective)
 
         async def runner():
+            nonlocal agent_active
             from ..session import inference_logging
 
-            async with agent_lock:
+            async with dashboard_inference_lock:
                 try:
                     with inference_logging(runlog):
                         res = await run_autonomous(
@@ -1312,8 +1323,10 @@ def create_app(config=None, sessions_dir: str | Path = "sessions", web_dir: str 
                 except Exception as exc:  # noqa: BLE001
                     error_event(f"{type(exc).__name__}: {exc}")
                 finally:
+                    agent_active = False
                     push(None)
 
+        agent_active = True
         task = asyncio.create_task(runner())
 
         async def gen():

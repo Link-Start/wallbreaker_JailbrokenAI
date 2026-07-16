@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, verdictKind, type ComposeResult, type Preset, type Transform, type FireResult } from "../api";
 
 type BusyAction = "compose" | "fire" | "firePayload" | null;
@@ -29,6 +29,19 @@ export function Console({ hasTarget }: { hasTarget: boolean }) {
   const [res, setRes] = useState<FireResult | null>(null);
   const [err, setErr] = useState("");
   const [copied, setCopied] = useState<string | null>(null);
+  const busyRef = useRef(false);
+
+  function begin(action: Exclude<BusyAction, null>): boolean {
+    if (busyRef.current) return false;
+    busyRef.current = true;
+    setBusy(action);
+    return true;
+  }
+
+  function end() {
+    busyRef.current = false;
+    setBusy(null);
+  }
 
   useEffect(() => {
     api.presets().then(setPresets).catch(() => {});
@@ -74,7 +87,7 @@ export function Console({ hasTarget }: { hasTarget: boolean }) {
   }
 
   async function compose() {
-    setBusy("compose");
+    if (!begin("compose")) return;
     setErr("");
     setRes(null);
     try {
@@ -84,12 +97,12 @@ export function Console({ hasTarget }: { hasTarget: boolean }) {
     } catch (e) {
       setErr((e as Error).message);
     } finally {
-      setBusy(null);
+      end();
     }
   }
 
   async function fire() {
-    setBusy("fire");
+    if (!begin("fire")) return;
     setErr("");
     setRes(null);
     try {
@@ -100,12 +113,12 @@ export function Console({ hasTarget }: { hasTarget: boolean }) {
     } catch (e) {
       setErr((e as Error).message);
     } finally {
-      setBusy(null);
+      end();
     }
   }
 
   async function firePayload() {
-    setBusy("firePayload");
+    if (!begin("firePayload")) return;
     setErr("");
     setRes(null);
     try {
@@ -124,7 +137,7 @@ export function Console({ hasTarget }: { hasTarget: boolean }) {
     } catch (e) {
       setErr((e as Error).message);
     } finally {
-      setBusy(null);
+      end();
     }
   }
 

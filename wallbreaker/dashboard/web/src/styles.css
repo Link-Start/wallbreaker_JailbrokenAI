@@ -594,6 +594,16 @@ tr:hover td { background: var(--panel); }
 .run-raw-panel {
   margin-top: 12px;
 }
+.inference-expanded { display: grid; gap: 12px; }
+.inference-meta { display: flex; flex-wrap: wrap; gap: 16px; margin: 8px 0; color: var(--muted); }
+.inference-meta span { display: grid; gap: 3px; }
+.inference-meta b { color: var(--accent); font-size: 11px; text-transform: uppercase; }
+.inference-segment { border-left: 3px solid var(--accent); margin: 8px 0; padding: 8px 12px; background: var(--bg); }
+.inference-segment.reasoning { border-color: var(--warn); }
+.inference-segment strong { color: var(--accent); font-size: 11px; letter-spacing: .08em; }
+.inference-segment pre { white-space: pre-wrap; }
+.inference-error { color: var(--bad); }
+.run-raw-panel summary { cursor: pointer; color: var(--accent); font-weight: 600; padding: 8px 0; }
 .run-field-list {
   display: grid;
 }
@@ -1116,6 +1126,7 @@ button.fire:disabled { opacity: 0.5; cursor: default; }
 .t-done { font-weight: 700; padding: 9px 12px; border-radius: 8px; margin-top: 6px; }
 .t-done.bypass { background: rgba(255, 77, 77, 0.14); color: var(--bad); }
 .t-done.held { background: rgba(86, 211, 100, 0.12); color: var(--good); }
+.t-done.error { background: rgba(255, 77, 77, 0.14); color: var(--bad); }
 .t-done.neutral { background: var(--panel); color: var(--muted); }
 
 /* scrollbars */

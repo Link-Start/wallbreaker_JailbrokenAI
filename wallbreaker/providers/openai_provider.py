@@ -171,8 +171,13 @@ class OpenAIProvider(Provider):
         finish_reason: str | None = None
         self.last_stop_reason = None
         self.last_completion_empty = False
+        saw_sse_event = False
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
+            # Routing providers such as The Grid return a same-origin 307 whose
+            # location identifies the selected inference supplier.  Their official
+            # curl example uses -L; without redirect following the HTML redirect
+            # page looks like a successful but empty stream.
+            async with httpx.AsyncClient(timeout=self.timeout, follow_redirects=True) as client:
                 async with client.stream("POST", url, headers=headers, json=payload) as resp:
                     if resp.status_code >= 400:
                         body = (await resp.aread()).decode("utf-8", "replace")
@@ -180,6 +185,7 @@ class OpenAIProvider(Provider):
                     async for line in resp.aiter_lines():
                         if not line.startswith("data:"):
                             continue
+                        saw_sse_event = True
                         data = line[5:].strip()
                         if not data or data == "[DONE]":
                             continue
@@ -218,6 +224,11 @@ class OpenAIProvider(Provider):
                                 slot["name"] = fn["name"]
                             if fn.get("arguments"):
                                 slot["args"] += fn["arguments"]
+                    if not saw_sse_event:
+                        raise ProviderError(
+                            "stream returned no SSE events from "
+                            f"{url} (content-type={resp.headers.get('content-type', 'unknown')})"
+                        )
         except httpx.HTTPError as exc:
             raise ProviderError(f"network error from {url}: {exc!r}") from exc
 

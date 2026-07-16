@@ -132,6 +132,12 @@ function detailForRecord(record: RunRecord): RowDetail {
   let prompt = firstText(record, ["payload", "prompt", "request", "query"]);
   let response = firstText(record, ["response", "content", "result", "answer", "output"]);
 
+  if (kind === "inference") {
+    response = firstText(record, ["text"]);
+    const request = objectValue(record.request);
+    prompt = firstText(record, ["operation"]) || firstText(request, ["system"]);
+  }
+
   if (kind === "user" || kind === "objective") {
     prompt = firstText(record, ["text", "payload", "prompt", "request"]) || prompt;
   } else if (kind === "assistant") {
@@ -152,6 +158,17 @@ function detailForRecord(record: RunRecord): RowDetail {
 function previewForRecord(record: RunRecord, detail: RowDetail): PreviewLine[] {
   const kind = textValue(record.kind).toLowerCase();
   const args = objectValue(record.args) || objectValue(record.input);
+  if (kind === "inference") {
+    const endpoint = objectValue(objectValue(record.request)?.endpoint);
+    const stream = Array.isArray(record.stream) ? record.stream as RunRecord[] : [];
+    const hasReasoning = stream.some((part) => textValue(part.channel) === "reasoning");
+    return [
+      { label: "Operation", value: firstText(record, ["operation"]) || "completion" },
+      { label: "Model", value: firstText(endpoint, ["model", "name"]) || "unknown" },
+      { label: "Status", value: firstText(record, ["status"]) || "incomplete" },
+      { label: hasReasoning ? "Reasoning" : "Response", value: snippet(firstText(record, ["text"])) },
+    ];
+  }
   if (kind === "tool_call") {
     return [
       { label: "Tool", value: firstText(record, ["tool", "name"]) || "tool_call" },
@@ -172,6 +189,36 @@ function previewForRecord(record: RunRecord, detail: RowDetail): PreviewLine[] {
   }
   const fields = Object.entries(record).filter(([key]) => key !== "ts" && key !== "kind");
   return fields.slice(0, 2).map(([key, value]) => ({ label: key, value: textValue(value) }));
+}
+
+function inferenceRequest(record: RunRecord): RunRecord {
+  return objectValue(record.request) || {};
+}
+
+function InferenceExpanded({ record }: { record: RunRecord }) {
+  const request = inferenceRequest(record);
+  const endpoint = objectValue(request.endpoint);
+  const messages = Array.isArray(request.messages) ? request.messages : [];
+  const tools = request.tools;
+  const stream = Array.isArray(record.stream) ? record.stream as RunRecord[] : [];
+  return (
+    <div className="inference-expanded">
+      <section className="run-text-panel"><div className="run-text-head"><b>Request</b></div>
+        <div className="inference-meta"><span><b>Operation</b>{firstText(record, ["operation"])}</span><span><b>Provider / model</b>{firstText(endpoint, ["provider", "name"])} · {firstText(endpoint, ["model"])}</span></div>
+        {textValue(request.system) && <><b>System prompt</b><pre>{textValue(request.system)}</pre></>}
+        <b>Messages</b><pre>{jsonValue(messages)}</pre>
+        {tools != null && <><b>Tools and parameters</b><pre>{jsonValue({ tools, parameters: request.parameters })}</pre></>}
+      </section>
+      <section className="run-text-panel"><div className="run-text-head"><b>Stream transcript</b></div>
+        {stream.length ? stream.map((part, index) => <div className={`inference-segment ${textValue(part.channel)}`} key={index}><strong>{textValue(part.channel) === "reasoning" ? "REASONING" : "MODEL"}</strong><pre>{textValue(part.text)}</pre></div>) : <span className="muted">No streamed text captured.</span>}
+      </section>
+      <section className="run-text-panel"><div className="run-text-head"><b>Completion</b></div>
+        <div className="inference-meta"><span><b>Status</b>{firstText(record, ["status"])}</span><span><b>Duration</b>{firstText(record, ["duration_ms"])} ms</span><span><b>Stop</b>{textValue(record.stop_reasons) || "none"}</span></div>
+        {textValue(record.error) && <pre className="inference-error">{textValue(record.error)}</pre>}
+        <b>Final response</b><pre>{textValue(record.text) || "Not recorded"}</pre>
+      </section>
+    </div>
+  );
 }
 
 function snippet(value: string): string {
@@ -458,8 +505,10 @@ export function Runs() {
               const detail = detailForRecord(r);
               const rowKey = `${open}-${i}`;
               const isExpanded = expanded.has(i);
-              const rawLine = runDetail?.raw_records?.[i] || jsonValue(r, false);
-              const lineNumber = runDetail?.line_numbers?.[i] ?? i + 1;
+              const sourceLines = Array.isArray(r.source_lines) ? r.source_lines as number[] : [];
+              const rawMap = new Map((runDetail?.line_numbers || []).map((line, index) => [line, runDetail?.raw_records?.[index] || ""]));
+              const rawLine = sourceLines.length ? sourceLines.map((line) => rawMap.get(line) || "").filter(Boolean).join("\n") : (runDetail?.raw_records?.[i] || jsonValue(r, false));
+              const lineNumber = sourceLines[0] ?? runDetail?.line_numbers?.[i] ?? i + 1;
               const lineKey = `${rowKey}-line`;
               const fields = Object.entries(r);
               const fieldsText = fields
@@ -490,7 +539,7 @@ export function Runs() {
                             </button>
                           </div>
                         </div>
-                        <div className="run-fields-panel">
+                        {textValue(r.kind).toLowerCase() === "inference" ? <InferenceExpanded record={r} /> : <div className="run-fields-panel">
                           <div className="run-text-head">
                             <b>All JSON fields</b>
                             <button
@@ -520,8 +569,9 @@ export function Runs() {
                               );
                             })}
                           </div>
-                        </div>
-                        <div className="run-text-panel run-raw-panel">
+                        </div>}
+                        <details className="run-text-panel run-raw-panel">
+                          <summary>Raw record</summary>
                           <div className="run-text-head">
                             <b>Raw JSONL line</b>
                             <button
@@ -533,7 +583,7 @@ export function Runs() {
                             </button>
                           </div>
                           <pre>{rawLine}</pre>
-                        </div>
+                        </details>
                       </td>
                     </tr>
                   )}

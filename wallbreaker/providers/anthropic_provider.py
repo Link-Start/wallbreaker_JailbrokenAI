@@ -126,7 +126,7 @@ class AnthropicProvider(Provider):
         self.last_stop_reason = None
         self.last_completion_empty = False
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
+            async with httpx.AsyncClient(timeout=self.timeout, follow_redirects=True) as client:
                 async with client.stream("POST", url, headers=headers, json=payload) as resp:
                     if resp.status_code >= 400:
                         body = (await resp.aread()).decode("utf-8", "replace")

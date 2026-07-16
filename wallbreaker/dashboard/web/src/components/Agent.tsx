@@ -13,8 +13,8 @@ type Item =
   | { kind: "done"; status: string; summary: string }
   | { kind: "error"; error: string };
 
-const DONE_KIND: Record<string, "bypass" | "held" | "neutral"> = {
-  finished: "bypass", ask: "neutral", stuck: "neutral", max_rounds: "held", error: "held",
+const DONE_KIND: Record<string, "bypass" | "held" | "neutral" | "error"> = {
+  finished: "bypass", ask: "neutral", stuck: "neutral", max_rounds: "held", error: "error",
 };
 
 export function Agent({ hasTarget }: { hasTarget: boolean }) {
@@ -27,6 +27,7 @@ export function Agent({ hasTarget }: { hasTarget: boolean }) {
   const [configStatus, setConfigStatus] = useState("");
   const [err, setErr] = useState("");
   const abortRef = useRef<AbortController | null>(null);
+  const runningRef = useRef(false);
   const bodyRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -66,7 +67,8 @@ export function Agent({ hasTarget }: { hasTarget: boolean }) {
   }
 
   async function run() {
-    if (!objective.trim()) return;
+    if (!objective.trim() || runningRef.current) return;
+    runningRef.current = true;
     setItems([]); setErr(""); setRunLog(""); setRunning(true);
     const ac = new AbortController();
     abortRef.current = ac;
@@ -75,6 +77,7 @@ export function Agent({ hasTarget }: { hasTarget: boolean }) {
     } catch (e) {
       if ((e as Error).name !== "AbortError") setErr((e as Error).message);
     } finally {
+      runningRef.current = false;
       setRunning(false);
       abortRef.current = null;
     }
@@ -82,7 +85,6 @@ export function Agent({ hasTarget }: { hasTarget: boolean }) {
 
   function stop() {
     abortRef.current?.abort();
-    setRunning(false);
   }
 
   async function saveAgentConfig() {

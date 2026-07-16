@@ -73,6 +73,11 @@ def load_run_log(path: str | Path) -> tuple[list[Message], dict]:
         row.get("inference_id") for row in records
         if row.get("kind") == "inference_request" and row.get("operation") == "agent_turn"
     }
+    compact = normalize_inference_records(records)
+    agent_inference_ids.update(
+        row.get("inference_id") for row in compact
+        if row.get("kind") == "inference" and row.get("operation") == "agent_turn"
+    )
     has_explicit_assistant = any(row.get("kind") == "assistant" for row in records)
     history: list[Message] = []
     for r in records:
@@ -81,6 +86,10 @@ def load_run_log(path: str | Path) -> tuple[list[Message], dict]:
             history.append(user(r.get("text", "")))
         elif kind == "assistant":
             text = r.get("text", "")
+            if text.strip():
+                history.append(assistant(text))
+        elif kind == "inference" and not has_explicit_assistant and r.get("inference_id") in agent_inference_ids:
+            text = str(r.get("text") or "")
             if text.strip():
                 history.append(assistant(text))
         elif (
@@ -163,6 +172,7 @@ def inference_logging(runlog: "RunLog") -> Iterator[None]:
     try:
         yield
     finally:
+        runlog.flush_inferences()
         _ACTIVE_RUNLOG.reset(token)
 
 
@@ -199,11 +209,7 @@ def trace_inference_response(inference_id: str, **data) -> None:
 def trace_inference_event(inference_id: str, event: dict) -> None:
     runlog = _ACTIVE_RUNLOG.get()
     if runlog is not None:
-        runlog.event(
-            "inference_event",
-            inference_id=inference_id,
-            event=runlog._json_value(event),
-        )
+        runlog.inference_event(inference_id, event)
 
 
 class RunLog:
@@ -214,6 +220,7 @@ class RunLog:
         self._started = False
         self._run_meta: dict = {}
         self._seq = 0
+        self._inference_buffers: dict[str, dict] = {}
 
     def _ensure(self) -> None:
         if not self._started:
@@ -300,26 +307,94 @@ class RunLog:
         operation: str,
         parameters: dict,
     ) -> None:
-        self.event(
-            "inference_request",
-            inference_id=inference_id,
-            operation=operation,
-            endpoint=self._endpoint_record(endpoint),
-            messages=[
+        if not self.enabled:
+            return
+        self._ensure()
+        self._inference_buffers[inference_id] = {
+            "ts": datetime.now().isoformat(timespec="seconds"),
+            "inference_id": inference_id,
+            "operation": operation,
+            "request": {
+                "endpoint": self._endpoint_record(endpoint),
+                "messages": [
                 self._json_value(message) if isinstance(message, dict)
                 else self._message_record(message)
                 for message in messages
-            ],
-            system=system,
-            tools=self._json_value(tools) if tools is not None else None,
-            parameters=self._json_value(parameters),
-        )
+                ],
+                "system": system,
+                "tools": self._json_value(tools) if tools is not None else None,
+                "parameters": self._json_value(parameters),
+            },
+            "stream": [], "stream_metadata": [], "stream_event_counts": {},
+        }
+
+    def inference_event(self, inference_id: str, event: dict) -> None:
+        if not self.enabled:
+            return
+        self._ensure()
+        buf = self._inference_buffers.setdefault(inference_id, {
+            "ts": datetime.now().isoformat(timespec="seconds"),
+            "inference_id": inference_id, "operation": "completion",
+            "request": {}, "stream": [], "stream_metadata": [],
+            "stream_event_counts": {},
+        })
+        event = self._json_value(event)
+        kind = str(event.get("type", "")) if isinstance(event, dict) else ""
+        counts = buf["stream_event_counts"]
+        counts[kind or "unknown"] = counts.get(kind or "unknown", 0) + 1
+        if kind in ("reasoning_delta", "text_delta"):
+            channel = "reasoning" if kind == "reasoning_delta" else "text"
+            text = str(event.get("text", ""))
+            if text:
+                stream = buf["stream"]
+                if stream and stream[-1]["channel"] == channel:
+                    stream[-1]["text"] += text
+                else:
+                    stream.append({"channel": channel, "text": text})
+        else:
+            buf["stream_metadata"].append(event)
+
+    def _flush_inference(self, inference_id: str, response: dict | None = None) -> None:
+        buf = self._inference_buffers.pop(inference_id, None)
+        if buf is None:
+            return
+        response = {k: self._json_value(v) for k, v in (response or {}).items()}
+        stream = buf.pop("stream")
+        buf["stream"] = stream
+        buf.update(response)
+        buf.setdefault("status", "incomplete")
+        buf.setdefault("stream_metadata", [])
+        buf.setdefault("stream_event_counts", {})
+        buf["text"] = "".join(part["text"] for part in stream if part["channel"] == "text")
+        buf["reasoning"] = "".join(part["text"] for part in stream if part["channel"] == "reasoning")
+        self._write({"ts": buf.pop("ts", datetime.now().isoformat(timespec="seconds")), "kind": "inference", **buf})
+
+    def flush_inferences(self, inference_id: str | None = None) -> None:
+        if not self.enabled:
+            return
+        ids = [inference_id] if inference_id else list(self._inference_buffers)
+        for ident in ids:
+            if ident in self._inference_buffers:
+                self._flush_inference(ident)
 
     def inference_response(self, inference_id: str, **data) -> None:
-        record = {"inference_id": inference_id}
-        for key, value in data.items():
-            record[key] = self._json_value(value)
-        self.event("inference_response", **record)
+        if not self.enabled:
+            return
+        self._ensure()
+        # Providers may also return their complete event list for diagnostics.  The
+        # trace hook has already captured it; keep the compact stream canonical and
+        # only use this list as a fallback for minimal providers that do not trace.
+        events = data.pop("stream_events", None)
+        if (
+            events
+            and inference_id in self._inference_buffers
+            and not self._inference_buffers[inference_id]["stream"]
+            and not self._inference_buffers[inference_id]["stream_metadata"]
+        ):
+            for event in events:
+                if isinstance(event, dict):
+                    self.inference_event(inference_id, event)
+        self._flush_inference(inference_id, data)
 
     def user(self, text: str) -> None:
         self.event("user", text=text)
@@ -341,3 +416,65 @@ class RunLog:
             "verdict", payload=payload, response=response, label=label,
             reason=reason, technique=technique or "manual",
         )
+
+
+def normalize_inference_records(records: list[dict], line_numbers: list[int] | None = None) -> list[dict]:
+    """Group legacy request/event/response rows into readable inference records."""
+    lines = line_numbers or list(range(1, len(records) + 1))
+    out: list[dict] = []
+    pending: dict[str, dict] = {}
+
+    def flush(ident: str, response: dict | None = None) -> None:
+        item = pending.pop(ident, None)
+        if item is None:
+            return
+        response = response or {}
+        stream = item.get("stream", [])
+        item.update({k: v for k, v in response.items() if k not in ("stream_events", "kind")})
+        item["kind"] = "inference"
+        item["stream"] = stream
+        item.setdefault("status", "incomplete")
+        item["text"] = "".join(s["text"] for s in stream if s.get("channel") == "text")
+        item["reasoning"] = "".join(s["text"] for s in stream if s.get("channel") == "reasoning")
+        item["source_lines"] = item.pop("_source_lines", [])
+        out.append(item)
+
+    for index, row in enumerate(records):
+        kind = row.get("kind")
+        ident = row.get("inference_id")
+        if kind == "inference_request" and ident:
+            pending[ident] = {
+                "ts": row.get("ts"), "kind": "inference", "inference_id": ident,
+                "operation": row.get("operation", "completion"),
+                "request": {k: row.get(k) for k in ("endpoint", "messages", "system", "tools", "parameters") if k in row},
+                "stream": [], "stream_metadata": [], "stream_event_counts": {},
+                "_source_lines": [lines[index]],
+            }
+            continue
+        if kind == "inference_event" and ident:
+            item = pending.setdefault(ident, {"kind": "inference", "inference_id": ident, "request": {}, "stream": [], "stream_metadata": [], "stream_event_counts": {}, "_source_lines": []})
+            item["_source_lines"].append(lines[index])
+            event = row.get("event") or {}
+            event_type = event.get("type", "unknown") if isinstance(event, dict) else "unknown"
+            item["stream_event_counts"][event_type] = item["stream_event_counts"].get(event_type, 0) + 1
+            if event_type in ("reasoning_delta", "text_delta"):
+                channel = "reasoning" if event_type == "reasoning_delta" else "text"
+                text = str(event.get("text", ""))
+                if text:
+                    if item["stream"] and item["stream"][-1]["channel"] == channel:
+                        item["stream"][-1]["text"] += text
+                    else:
+                        item["stream"].append({"channel": channel, "text": text})
+            else:
+                item["stream_metadata"].append(event)
+            continue
+        if kind == "inference_response" and ident:
+            item = pending.get(ident)
+            if item is not None:
+                item["_source_lines"].append(lines[index])
+            flush(ident, row)
+            continue
+        out.append(row)
+    for ident in list(pending):
+        flush(ident)
+    return out
