@@ -10,7 +10,7 @@
         break the wall · not the rules of engagement    ⚔  authorized testing only
 ```
 
-A Claude-Code-style terminal agent built for red-teaming LLMs (CLI command: `wallbreaker`). You talk to it like
+A Claude-Code-style terminal built for red-teaming LLMs (CLI command: `wallbreaker`). You talk to it like
 Claude Code; it reasons and calls tools in a loop. The backend is fully configurable, so
 it runs on **OpenRouter**, the **Z.AI GLM coding plan**, the local **Claude Code CLI**, a
 local server, or any OpenAI-/Anthropic-compatible API (including third-party proxies via
